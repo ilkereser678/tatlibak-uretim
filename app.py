@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import streamlit as st
 
@@ -7,8 +8,9 @@ st.set_page_config(
 
 st.title("🍰 Tatlıbak Yaş Pasta Üretim & Sipariş Planlama Asistanı")
 
-# Excel dosyasını yükleme
+# Excel ve CSV dosya yolları
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
+csv_archive_file = "daily_orders.csv"
 
 
 @st.cache_data
@@ -22,6 +24,14 @@ try:
   df_all = load_data()
 except Exception as e:
   st.error(f"Excel dosyası yüklenirken hata oluştu: {e}")
+
+# CSV Arşiv dosyasını okuma veya oluşturma
+if os.path.exists(csv_archive_file):
+  df_orders = pd.read_csv(csv_archive_file)
+else:
+  df_orders = pd.DataFrame(
+      columns=["Tarih", "Pasta Çeşidi", "Gerçekleşen Sipariş"]
+  )
 
 # Sekme Yapısı (Tabs)
 tab1, tab2, tab3 = st.tabs([
@@ -123,24 +133,19 @@ with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   st.write(
       "Bu ekrandan akşam gelen gerçek sipariş adetlerini ilgili tarihe"
-      " işleyebilirsiniz."
+      " işleyebilir ve doğrudan arşive kaydedebilirsiniz."
   )
 
-  # Ürün listesini alalım (BATON hariç veya tümü)
   if df_all is not None:
-    products_list = (
-        df_all.iloc[1:, 0].dropna().astype(str).tolist()
-    )  # BATON filtrelemeden tüm liste
+    products_list = df_all.iloc[1:, 0].dropna().astype(str).tolist()
 
-    order_date = st.date_input("Sipariş Tarihi Seçin")
+    order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
 
     st.markdown("---")
     st.write("### Ürün Bazlı Sipariş Adetleri")
 
-    # Kullanıcının kolayca girebilmesi için bir form oluşturalım
     with st.form("order_entry_form"):
       entered_orders = {}
-      # Kolonlara bölerek daha şık bir görünüm sağlayalım
       cols = st.columns(2)
       for idx, prod in enumerate(products_list):
         col_idx = idx % 2
@@ -150,17 +155,69 @@ with tab2:
           )
 
       submit_order = st.form_submit_button(
-          "💾 Gerçekleşen Siparişleri Kaydet"
+          "💾 Gerçekleşen Siparişleri Kalıcı Olarak Kaydet"
       )
 
       if submit_order:
-        st.success(
-            f"✅ {order_date.strftime('%d.%m.%Y')} tarihli siparişler başarıyla"
-            " sisteme kaydedildi!"
-        )
-        # Not: İlerleyen aşamada bu verileri doğrudan Excel'e sütun olarak ekletebiliriz.
+        new_rows = []
+        str_date = order_date.strftime("%Y-%m-%d")
+
+        # Aynı tarihe ait eski kayıtlar varsa temizleyelim (güncelleme mantığı için)
+        if not df_orders.empty and "Tarih" in df_orders.columns:
+          df_orders = df_orders[df_orders["Tarih"] != str_date]
+
+        for prod, qty in entered_orders.items():
+          if qty > 0:  # Sadece sıfırdan büyükleri kaydedelim
+            new_rows.append({
+                "Tarih": str_date,
+                "Pasta Çeşidi": prod,
+                "Gerçekleşen Sipariş": qty,
+            })
+
+        if new_rows:
+          new_df = pd.DataFrame(new_rows)
+          df_orders = pd.concat([df_orders, new_df], ignore_index=True)
+          df_orders.to_csv(csv_archive_file, index=False)
+          st.success(
+              f"✅ {order_date.strftime('%d.%m.%Y')} tarihli siparişler arşive"
+              " başarıyla kaydedildi!"
+          )
+        else:
+          st.warning(
+              "⚠️ Kaydedilecek 0'dan büyük sipariş adedi girilmediği için"
+              " kayıt yapılmadı."
+          )
 
 with tab3:
-  st.subheader("Geçmiş Arşiv ve Excel Tabloları")
+  st.subheader("📂 Arşiv, Geçmiş Siparişler ve Kayıt Yönetimi")
+
+  # Kayıt silme veya düzenleme alanı
+  if not df_orders.empty:
+    st.write("### 🗑️ Kayıt Düzenleme / Silme")
+    unique_dates = df_orders["Tarih"].unique().tolist()
+    selected_del_date = st.selectbox(
+        "Silmek veya Güncellemek İstediğiniz Tarihi Seçin", unique_dates
+    )
+
+    if st.button("🗑️ Seçilen Tarihe Ait Kayıtları Sil"):
+      df_orders = df_orders[df_orders["Tarih"] != selected_del_date]
+      df_orders.to_csv(csv_archive_file, index=False)
+      st.success(
+          f"✅ {selected_del_date} tarihli kayıtlar arşivden silindi. Sayfayı"
+          " yenileyebilirsiniz."
+      )
+      st.rerun()
+
+    st.markdown("---")
+    st.write("### 📊 Kaydedilen Tüm Sipariş Arşivi (`daily_orders.csv`)")
+    st.dataframe(df_orders, use_container_width=True, height=400)
+  else:
+    st.info(
+        "Henüz arşive kaydedilmiş günlük sipariş bulunmuyor. 'Günlük Sipariş"
+        " Girişi' sekmesinden veri ekleyebilirsiniz."
+    )
+
+  st.markdown("---")
+  st.subheader("📂 Orijinal Excel Dosyası Arşivi")
   if df_all is not None:
-    st.dataframe(df_all, use_container_width=True, height=500)
+    st.dataframe(df_all, use_container_width=True, height=400)
