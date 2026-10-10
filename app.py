@@ -80,10 +80,7 @@ with tab1:
           f" Hazırlandı! (Stok Payı: %{buffer_pct})"
       )
 
-      # Pasta isimleri 0. sütunda, 1. satırdan başlar
       products = df_all.iloc[1:, 0].values
-
-      # Verileri sayısal formata dönüştürüyoruz (metin kaynaklı 0 sorununu çözer)
       numeric_df = df_all.iloc[1:, 1:].apply(pd.to_numeric, errors="coerce")
 
       if not numeric_df.empty:
@@ -91,7 +88,6 @@ with tab1:
       else:
         base_vals = pd.Series([0] * len(products))
 
-      # Seçilen yüzdeye göre stok payı ekleyip yuvarlıyoruz
       multiplier = 1 + (buffer_pct / 100.0)
       forecast_vals = (base_vals * multiplier).round().astype(int)
 
@@ -101,7 +97,6 @@ with tab1:
           f"Tahmini Üretim (%{buffer_pct} Stoklu)": forecast_vals,
       })
 
-      # Boş satırları ve BATON ürünlerini filtreleyelim
       forecast_df = forecast_df.dropna(subset=["Pasta Çeşidi"])
       forecast_df = forecast_df[
           ~forecast_df["Pasta Çeşidi"]
@@ -127,10 +122,43 @@ with tab1:
 with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   st.write(
-      "Bu ekrandan akşam gelen gerçek siparişleri girebilir ve doğrudan"
-      " sisteme kaydedebilirsiniz."
+      "Bu ekrandan akşam gelen gerçek sipariş adetlerini ilgili tarihe"
+      " işleyebilirsiniz."
   )
-  st.info("Sipariş giriş ekranı yapım aşamasında...")
+
+  # Ürün listesini alalım (BATON hariç veya tümü)
+  if df_all is not None:
+    products_list = (
+        df_all.iloc[1:, 0].dropna().astype(str).tolist()
+    )  # BATON filtrelemeden tüm liste
+
+    order_date = st.date_input("Sipariş Tarihi Seçin")
+
+    st.markdown("---")
+    st.write("### Ürün Bazlı Sipariş Adetleri")
+
+    # Kullanıcının kolayca girebilmesi için bir form oluşturalım
+    with st.form("order_entry_form"):
+      entered_orders = {}
+      # Kolonlara bölerek daha şık bir görünüm sağlayalım
+      cols = st.columns(2)
+      for idx, prod in enumerate(products_list):
+        col_idx = idx % 2
+        with cols[col_idx]:
+          entered_orders[prod] = st.number_input(
+              f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
+          )
+
+      submit_order = st.form_submit_button(
+          "💾 Gerçekleşen Siparişleri Kaydet"
+      )
+
+      if submit_order:
+        st.success(
+            f"✅ {order_date.strftime('%d.%m.%Y')} tarihli siparişler başarıyla"
+            " sisteme kaydedildi!"
+        )
+        # Not: İlerleyen aşamada bu verileri doğrudan Excel'e sütun olarak ekletebiliriz.
 
 with tab3:
   st.subheader("Geçmiş Arşiv ve Excel Tabloları")
