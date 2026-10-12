@@ -308,3 +308,146 @@ with tab1:
           df_history["Week_Of_Month"] = (
               df_history["Parsed_Date"].dt.day - 1
           ) // 7 + 1
+
+          num_cols = df_history.select_dtypes(
+              include=["number", "float", "int"]
+          ).columns
+
+          if not num_cols.empty:
+            matched_hist = df_history[
+                (df_history["Parsed_Date"].dt.month == target_month)
+                & (df_history["Week_Of_Month"] == week_of_month)
+                & (df_history["Weekday"] == target_weekday)
+            ]
+
+            hist_val = 0
+            hist_date_str = ""
+            if not matched_hist.empty:
+              hist_val = int(matched_hist[num_cols].sum().sum())
+              hist_date_str = (
+                  matched_hist["Parsed_Date"]
+                  .dt.strftime("%d.%m.%Y")
+                  .values[0]
+              )
+            else:
+              matched_alt = df_history[
+                  (df_history["Parsed_Date"].dt.month == target_month)
+                  & (df_history["Weekday"] == target_weekday)
+              ]
+              if not matched_alt.empty:
+                hist_val = int(
+                    matched_alt[num_cols].sum().sum() / len(matched_alt)
+                )
+                hist_date_str = "Geçen yıl aynı ayın benzer günleri"
+
+            past_weather_query_date = f"2025-{target_month:02d}-{target_day:02d}"
+            past_weather_info = fetch_historical_weather(
+                past_weather_query_date
+            )
+
+            buffer_text = (
+                f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
+            )
+
+            if hist_val > 0:
+              historical_insight_text = (
+                  f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
+                  f" {week_of_month}. haftasının {days_tr.get(day_of_week,'')}"
+                  f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
+                  f" O gün hava **{past_weather_info}** idi. Güncel şube"
+                  f" talepleri, hava koşulları{buffer_text} dikkate alınarak"
+                  f" bugünkü üretim hedefiniz **{subtotal} adet** olarak"
+                  " optimize edilmiştir."
+              )
+            else:
+              historical_insight_text = (
+                  "Geçen yıl arşivinde benzer gün konumu için doğrudan"
+                  f" eşleşme bulunamadı, ancak mevcut sipariş ve hava trendi"
+                  f" baz alınarak hedef **{subtotal} adet** olarak belirlendi."
+              )
+          else:
+            historical_insight_text = (
+                "Geçmiş yıl verisinde uygun sayısal sütun bulunamadı."
+            )
+        except Exception as ex:
+          historical_insight_text = (
+              f"Geçmiş yıl verisi analiz edilirken hata oluştu: {ex}"
+          )
+
+      st.markdown("---")
+      st.info(
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti**\n\n"
+          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
+          f" (Ayın {week_of_month}. haftası) için **{special_day}** ve hava"
+          f" koşulu **'{weather_condition}'** ({temperature}°C) baz"
+          f" alınmıştır.\n- **Analiz & Karşılaştırma:**"
+          f" {historical_insight_text}"
+      )
+
+    else:
+      st.info(
+          "👈 Sol panelden 3 günlük hava tablosuna bakarak kriterleri seçip"
+          " **'Yarın İçin Tahmini Üretim Listesi Oluştur'** butonuna tıklayın."
+      )
+
+with tab2:
+  st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
+  if df_all is not None:
+    desired_order = [
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "BÜYÜK TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "BÜYÜK TURTA MUZLU (MUZLU TURTA)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "ORTA TURTA MEYVELİ",
+        "ORTA TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "ORTA TURTA MUZLU (MUZLU TURTA)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "SIFIR BOY PASTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "SIFIR BOY PASTA MUZLU (MUZLU TURTA)",
+        "SIFIR BOY PASTA MEYVELİ",
+        "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
+        "ORTA TURTA ÇİLEKLİ OREO PASTA",
+        "SIFIR TURTA ÇİLEKLİ OREO PASTA",
+    ]
+    excel_products = [
+        p
+        for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
+        if "TOPLAM" not in p.strip().upper()
+    ]
+    products_list = [p for p in desired_order if p in excel_products]
+    for p in excel_products:
+      if p not in products_list:
+        products_list.append(p)
+
+    order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
+    st.markdown("---")
+    st.markdown("🌤️ **O Günün Hava & Çevre Koşulları**")
+    entry_weather = st.selectbox(
+        "Hava Durumu",
+        [
+            "Açık",
+            "Bulutlu",
+            "Hafif Çisenti",
+            "Hafif Yağmurlu",
+            "Çok Yağmurlu",
+            "Çok Bulutlu",
+        ],
+        key="entry_weather",
+    )
+    entry_temp = st.number_input(
+        "Sıcaklık (°C)", min_value=-10, max_value=45, value=20, step=1, key="entry_temp"
+    )
+
+    st.markdown("---")
+    with st.form("order_entry_form"):
+      entered_orders = {}
+      for idx,
