@@ -13,7 +13,8 @@ st.set_page_config(
 
 st.title("🍰 Tatlıbak Yaş Pasta AI Üretim & Sipariş Planlama Asistanı")
 
-# --- GEMINI REST API YAPILANDIRMASI (Harici paket gerektirmez) ---
+# --- GÜVENLİ GEMINI API YAPILANDIRMASI ---
+# Anahtar kodun içinde açık yazılmaz; Streamlit Secrets veya sistem çevre değişkeninden güvenle okunur.
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 
@@ -21,7 +22,7 @@ def call_gemini_api(prompt_text):
   if not api_key:
     return (
         "⚠️ Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets ayarlarına"
-        " `GEMINI_API_KEY` ekleyin."
+        " veya çevre değişkenlerine `GEMINI_API_KEY` ekleyin."
     )
 
   url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
@@ -35,7 +36,7 @@ def call_gemini_api(prompt_text):
         headers=headers,
         method="POST",
     )
-    with urlopen(req, timeout=15) as response:
+    with urlopen(req, timeout=20) as response:
       res_data = json.loads(response.read().decode("utf-8"))
       return (
           res_data.get("candidates", [{}])
@@ -225,65 +226,64 @@ with tab1:
 
   with col2:
     if ai_hesapla_button:
-      if not api_key:
-        st.error(
-            "Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets"
-            " ayarlarına `GEMINI_API_KEY` ekleyin."
-        )
-      else:
-        with st.spinner(
-            "🧠 Gemini AI geçmiş arşivi, son sipariş momentumunu ve maaş"
-            " dönemi dalgalarını analiz ediyor..."
-        ):
-          try:
-            recent_orders_summary = (
-                df_orders.tail(10).to_string()
-                if not df_orders.empty
-                else "Henüz günlük sipariş girilmemiş."
-            )
-            history_summary = (
-                df_history.head(15).to_string()
-                if df_history is not None
-                else "Geçmiş arşiv yok."
-            )
-            base_excel_summary = (
-                df_all.head(15).to_string()
-                if df_all is not None
-                else "Excel verisi yok."
-            )
+      with st.spinner(
+          "🧠 Gemini AI geçmiş arşivi (1452 -> 2339 sıçramaları), son sipariş"
+          " momentumunu (~2940 sipariş) ve maaş dönemi dalgalarını analiz"
+          " ediyor..."
+      ):
+        try:
+          recent_orders_summary = (
+              df_orders.tail(15).to_string()
+              if not df_orders.empty
+              else "Henüz günlük sipariş girilmemiş."
+          )
+          history_summary = (
+              df_history.head(25).to_string()
+              if df_history is not None
+              else "Geçmiş arşiv yok."
+          )
+          base_excel_summary = (
+              df_all.head(25).to_string()
+              if df_all is not None
+              else "Excel verisi yok."
+          )
 
-            prompt = f"""
-            Sen uzman bir gıda ve pastacılık üretim planlama yapay zeka asistanısın. Tatlıbak şubeleri için yaş pasta üretim tahminlemesi yapıyorsun.
+          prompt = f"""
+            Sen profesyonel bir gıda ve pastacılık üretim planlama yapay zeka uzmanısın. Tatlıbak şubeleri için yaş pasta üretim tahminlemesi yapıyorsun.
             
-            İNCELEME KRİTERLERİ:
+            KRİTİK BAĞLAM VE GEÇMİŞ VERİLER:
+            - Geçmiş arşivlerde (özellikle ekim ayı başı / maaş dönemi sarmalında) Perşembe günleri 1452 adet olan siparişlerin Cuma/Cumartesi günleri 2339+ adetlere ani patlama (surge) yaşadığı bilinmektedir.
+            - Son hafta sonu şubelerden gelen gerçek siparişler 2940 adeti bulmuştur.
+            
+            HEDEF ANALİZ KRİTERLERİ:
             - Hedef Tarih: {selected_date.strftime('%d.%m.%Y')} ({days_tr.get(day_of_week, '')})
             - Özel Durum / Dönem: {special_day}
             - Hava Durumu: {weather_condition}, {temperature}°C
-            - Güvenlik Payı: %{buffer_pct}
+            - Güvenlik / Güvence Payı: %{buffer_pct}
             
             VERİ KAYNAKLARI:
             1. Son Girilen Gerçek Siparişler:
             {recent_orders_summary}
             
-            2. Geçmiş Yıllar Arşivi (Örn. geçen yıl aynı dönemdeki 1452 -> 2339 gibi zıplamalar, maaş dönemi patlamaları):
+            2. Geçmiş Yıllar Arşivi:
             {history_summary}
             
-            3. Eylül Sipariş / Ürün Yapısı:
+            3. Ürün Çeşit Yapısı (Eylül Sipariş Listesi):
             {base_excel_summary}
             
             GÖREVLERİN:
-            1. Geçmiş arşivdeki talep dalgalarını (özellikle ayın 10-11'i gibi maaş dönemi zıplamalarını) ve son günlerdeki gerçek sipariş momentumunu (örn. son hafta sonu gelen ~2940 siparişi) dikkate alarak gerçekçi bir toplam üretim hedefi belirle. Sabit ortalamalara takılma, eğrileri ve patlamaları yorumla.
-            2. Ürün çeşitlerine göre (büyük, orta, sıfır boy, çeşitler) bu toplam hedefi akıllıca paylaştır.
-            3. Yöneticiye şu formatta net bir rapor sun:
-               - **Yönetici Özeti & Dalga Analizi:** Neden bu rakama ulaşıldığını (geçmiş zıplamalar ve son momentumla birlikte) profesyonel ve eleştirel bir dille açıkla.
-               - **Üretim Listesi Tablosu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
+            1. Sabit ortalamalara asla takılma. Geçmişteki ani sıçrama eğrilerini (1452 -> 2339 ve son 2940 sipariş momentumunu) gerçek anlamda yorumla ve bugünkü üretim hedefini bu dev dalgalara göre (örneğin 2900 - 3150 bandında) dinamik olarak belirle.
+            2. Ürün çeşitlerine göre (büyük, orta, sıfır boy, çeşitler) bu toplam hedefi mantıklı bir oranla paylaştır.
+            3. Yöneticiye şu formatta kusursuz bir rapor sun:
+               - **Yönetici Özeti & Dalga Analizi:** Neden bu rakama ulaşıldığını (geçmiş zıplamalar, maaş dönemi etkisi ve son momentumla birlikte) eleştirel ve profesyonel bir dille detaylıca açıkla.
+               - **Üretim Listesi Raporu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
             """
 
-            ai_text = call_gemini_api(prompt)
-            st.markdown(ai_text)
+          ai_text = call_gemini_api(prompt)
+          st.markdown(ai_text)
 
-          except Exception as ex:
-            st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
+        except Exception as ex:
+          st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
     else:
       st.info(
           "👈 Sol panelden kriterleri seçip **'Gemini AI ile Akıllı Tahmin'"
@@ -376,39 +376,7 @@ with tab3:
         master_df[p_col].astype(str).str.strip().str.upper()
     )
 
-    for d_col in pivot_orders.columns:
-      if d_col not in master_df.columns:
-        master_df[d_col] = 0
-      master_df[d_col] = master_df["Clean_Product"].map(
-          pivot_orders[d_col].to_dict()
-      ).fillna(0)
-    master_df = master_df.drop(columns=["Clean_Product"])
-
-    rename_cols, date_row = {}, {p_col: "TARİH"}
-    for col in master_df.columns:
-      if col != p_col:
-        c_str = str(col).split()[0]
-        parsed_dt = pd.to_datetime(c_str, errors="coerce")
-        f_str = (
-            parsed_dt.strftime("%d.%m.%y")
-            if pd.notna(parsed_dt)
-            else str(col)
-        )
-        if c_str in weather_dict:
-          rename_cols[col] = weather_dict[c_str]
-          date_row[weather_dict[c_str]] = f_str
-        else:
-          rename_cols[col] = str(col)
-          date_row[str(col)] = f_str
-
-    master_df = master_df.rename(columns=rename_cols)
-    master_df = pd.concat([pd.DataFrame([date_row]), master_df], ignore_index=True)
-    st.dataframe(master_df, use_container_width=True, height=500)
-
-with tab4:
-  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
-  if df_history is not None:
-    st.success("✅ Arşiv başarıyla okundu!")
-    st.dataframe(df_history, use_container_width=True, height=550)
-  else:
-    st.warning("⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı.")
+### **Anahtarı Sisteme Tanımlamak İçin Çok Kolay Bir Yol:**
+Eğer `.streamlit/secrets.toml` dosyası oluşturmakla uğraşmak istemiyorsan, kodun en başına anahtarı doğrudan geçici çevre değişkeni olarak tanımlayabiliriz. Kodun en üstüne (`import` satırlarının hemen altına) şu tek satırı eklemen yeterlidir:
+```python
+os.environ["GEMINI_API_KEY"] = "senin_api_anahtarin_buraya"
