@@ -8,7 +8,7 @@ st.set_page_config(
 
 st.title("🍰 Tatlıbak Yaş Pasta Üretim & Sipariş Planlama Asistanı")
 
-# Excel ve CSV dosya yolları
+# Excel و CSV dosya yolları
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
 
@@ -333,17 +333,16 @@ with tab3:
         )
         st.rerun()
 
-  # --- GÜNCELLENMİŞ: Excel + Yeni Girilenleri Birleştiren ve Altında Toplam Veren Matris Tablo ---
+  # --- DÜZELTİLMİŞ: Excel'in Kendi 'TOPLAM PASTA SAYISI' Satırını Dinamik Güncelleyen Matris Tablo ---
   st.markdown("---")
-  st.subheader(
-      "📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Girilenler ve Toplam)"
-  )
+  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Günler)")
 
   if df_all is not None:
     master_df = df_all.copy()
+    product_col_name = master_df.columns[0]
 
+    # 1. Yeni girilen CSV siparişlerini matrise ekleyelim
     if not df_orders.empty:
-      # Ürün isimlerini standartlaştırarak (büyük/küçük harf ve boşlukları temizleyerek) eşleştirmeyi garantileyelim
       df_orders["Clean_Product"] = (
           df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
       )
@@ -355,7 +354,6 @@ with tab3:
           aggfunc="sum",
       ).fillna(0)
 
-      product_col_name = master_df.columns[0]
       master_df["Clean_Product"] = (
           master_df[product_col_name].astype(str).str.strip().str.upper()
       )
@@ -369,19 +367,24 @@ with tab3:
 
       master_df = master_df.drop(columns=["Clean_Product"])
 
-    # --- YENİ: Sayısal sütunların altına GENEL TOPLAM satırı ekleme ---
-    summary_row = {}
-    for col in master_df.columns:
-      # Sütundaki değerleri sayısal formata çevirip toplamını alalım
-      numeric_col = pd.to_numeric(master_df[col], errors="coerce")
-      if not numeric_col.isna().all():
-        summary_row[col] = numeric_col.sum()
-      else:
-        # İlk sütun veya metin sütunu ise başlık yazalım
-        summary_row[col] = "GENEL TOPLAM" if col == master_df.columns[0] else ""
+    # 2. Orijinal Excel'deki "TOPLAM PASTA SAYISI" satırını bulup tüm sayısal sütunlar için güncel toplamı yazdıralım
+    total_row_mask = (
+        master_df[product_col_name]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.contains("TOPLAM PASTA SAYISI", na=False)
+    )
 
-    # Toplam satırını tabloya ekleyelim
-    summary_df = pd.DataFrame([summary_row])
-    final_display_df = pd.concat([master_df, summary_df], ignore_index=True)
+    if total_row_mask.any():
+      # Ürün çeşitleri satırlarını alalım (Toplam satırı hariç)
+      products_only_df = master_df[~total_row_mask]
 
-    st.dataframe(final_display_df, use_container_width=True, height=480)
+      # Tüm sayısal sütunlar için (hem eski Excel sütunları hem yeni eklenenler) toplamları hesaplayalım
+      for col in master_df.columns:
+        if col != product_col_name:
+          numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
+          if not numeric_col.isna().all():
+            master_df.loc[total_row_mask, col] = numeric_col.sum()
+
+    st.dataframe(master_df, use_container_width=True, height=480)
