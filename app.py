@@ -28,7 +28,6 @@ except Exception as e:
 # CSV Arşiv dosyasını okuma veya oluşturma
 if os.path.exists(csv_archive_file):
   df_orders = pd.read_csv(csv_archive_file)
-  # Tarih sütununu datetime formatına çevirelim
   df_orders["Tarih"] = pd.to_datetime(df_orders["Tarih"])
 else:
   df_orders = pd.DataFrame(
@@ -64,14 +63,34 @@ with tab1:
     tr_day = days_tr.get(day_of_week, "")
     st.info(f"Seçilen Gün: **{tr_day}**")
 
+    # Hava Durumu & Sıcaklık Parametreleri
+    st.markdown("---")
+    st.markdown("🌤️ **Hava & Çevre Koşulları**")
     weather_condition = st.selectbox(
-        "Yarının Hava Durumu / Koşul",
+        "Hava Durumu Etkisi",
         [
-            "Açık / Güneşli",
-            "Az Bulutlu",
-            "Parçalı Bulutlu",
-            "Hafif Yağmurlu / Çisenti",
-            "Yağmurlu",
+            "Açık / Güneşli (Normal)",
+            "Bulutlu / Hafif Yağmurlu (Talep Artışı +%)",
+            "Çok Yağmurlu / Fırtınalı (Talep Düşüşü -%)",
+            "Aşırı Sıcak / Güneşli (Ağır Tatlı Azalır)",
+        ],
+    )
+
+    temperature = st.slider(
+        "Beklenen Sıcaklık (°C)", min_value=-5, max_value=40, value=20, step=1
+    )
+
+    # Özel Günler ve Resmi Tatiller
+    st.markdown("🎉 **Özel Gün & Tatil Seçenekleri**")
+    special_day = st.selectbox(
+        "Özel Gün Durumu",
+        [
+            "Normal Gün",
+            "Yılbaşı ve Arifesi",
+            "Sevgililer Günü (14 Şubat)",
+            "Anneler Günü",
+            "Resmi Tatil / Bayram (29 Ekim, 23 Nisan vb.)",
+            "Hafta Sonu / Cuma Akşamı Yoğunluğu",
         ],
     )
 
@@ -80,16 +99,34 @@ with tab1:
     )
 
     buffer_pct = st.selectbox(
-        "Stok / Güvenlik Payı Ekle (%)", [5, 10, 15, 20, 25], index=1
+        "Stok / Güvenlik Payı Ekle (%)", [0, 5, 10, 15, 20, 25], index=2
     )
 
     hesapla_button = st.button("🚀 Yarın İçin Tahmini Üretim Listesi Oluştur")
 
   with col2:
     if hesapla_button:
+      environmental_multiplier = 1.0
+      if "Bulutlu" in weather_condition:
+        environmental_multiplier += 0.05
+      elif "Çok Yağmurlu" in weather_condition:
+        environmental_multiplier -= 0.08
+      elif "Aşırı Sıcak" in weather_condition or temperature > 30:
+        environmental_multiplier -= 0.05
+
+      special_multiplier = 1.0
+      if "Yılbaşı" in special_day:
+        special_multiplier = 1.40
+      elif "Sevgililer" in special_day or "Anneler" in special_day:
+        special_multiplier = 1.25
+      elif "Resmi Tatil" in special_day:
+        special_multiplier = 1.15
+      elif "Hafta Sonu" in special_day:
+        special_multiplier = 1.10
+
       st.success(
-          f"📋 {selected_date.strftime('%d.%m.%Y')} Sonrası İçin Tahmin"
-          f" Hazırlandı! (Stok Payı: %{buffer_pct})"
+          f"📋 {selected_date.strftime('%d.%m.%Y')} İçin Tahmin Hazırlandı! |"
+          f" Hava: {weather_condition} ({temperature}°C) | Özel Gün: {special_day}"
       )
 
       products = df_all.iloc[1:, 0].values
@@ -100,13 +137,22 @@ with tab1:
       else:
         base_vals = pd.Series([0] * len(products))
 
-      multiplier = 1 + (buffer_pct / 100.0)
-      forecast_vals = (base_vals * multiplier).round().astype(int)
+      combined_multiplier = (
+          environmental_multiplier
+          * special_multiplier
+          * (1 + (buffer_pct / 100.0))
+      )
+      forecast_vals = (base_vals * combined_multiplier).round().astype(int)
+
+      if buffer_pct == 0:
+        target_col_name = "Tahmini Üretim (Net / Stoksuz)"
+      else:
+        target_col_name = f"Tahmini Üretim (%{buffer_pct} Stoklu + Akıllı Etki)"
 
       forecast_df = pd.DataFrame({
           "Pasta Çeşidi": products,
           "Baz Ortalama": base_vals.round().astype(int),
-          f"Tahmini Üretim (%{buffer_pct} Stoklu)": forecast_vals,
+          target_col_name: forecast_vals,
       })
 
       forecast_df = forecast_df.dropna(subset=["Pasta Çeşidi"])
@@ -116,35 +162,71 @@ with tab1:
           .str.contains("BATON", na=False)
       ]
 
-      total_forecast = forecast_df[
-          f"Tahmini Üretim (%{buffer_pct} Stoklu)"
-      ].sum()
+      total_forecast = int(forecast_df[target_col_name].sum())
 
       st.metric(
-          label=f"Önerilen Toplam Pasta Üretimi (Stoklu: %{buffer_pct})",
+          label=(
+              f"Önerilen Toplam Pasta Üretimi (Stok: %{buffer_pct} + Hava/Özel"
+              " Gün Etkili)"
+          ),
           value=f"{total_forecast} Adet",
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
     else:
       st.info(
-          "👈 Sol panelden tarih, stok yüzdesi ve verileri seçip **'Yarın İçin"
-          " Tahmini Üretim Listesi Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden tarih, hava durumu, özel gün ve stok yüzdesini seçip"
+          " **'Yarın İçin Tahmini Üretim Listesi Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   st.write(
-      "Bu ekrandan akşam gelen gerçek sipariş adetlerini ilgili tarihe"
-      " işleyebilir ve doğrudan arşive kaydedebilirsiniz."
+      "Bu ekrandan akşam gelen gerçek sipariş adetlerini belirlediğiniz"
+      " sıralamaya göre ilgili tarihe işleyebilir ve arşive"
+      " kaydedebilirsiniz."
   )
 
   if df_all is not None:
-    products_list = df_all.iloc[1:, 0].dropna().astype(str).tolist()
+    # --- YENİ: Gönderdiğiniz görsele göre özel üretim/sipariş sıralaması ---
+    desired_order = [
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "BÜYÜK TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "BÜYÜK TURTA MUZLU (MUZLU TURTA)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "ORTA TURTA MEYVELİ",
+        "ORTA TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "ORTA TURTA MUZLU (MUZLU TURTA)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+        "SIFIR BOY PASTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+        "SIFIR BOY PASTA MUZLU (MUZLU TURTA)",
+        "SIFIR BOY PASTA MEYVELİ",
+        "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
+        "ORTA TURTA ÇİLEKLİ OREO PASTA",
+        "SIFIR TURTA ÇİLEKLİ OREO PASTA",
+    ]
+
+    # Excel'den gelen mevcut ürünleri alalım
+    excel_products = df_all.iloc[1:, 0].dropna().astype(str).tolist()
+
+    # İstediğiniz sıralamada olanları öne alalım, listede olup özel sırada olmayanları da arkasına ekleyelim
+    products_list = [p for p in desired_order if p in excel_products]
+    for p in excel_products:
+      if p not in products_list:
+        products_list.append(p)
 
     order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
 
     st.markdown("---")
-    st.write("### Ürün Bazlı Sipariş Adetleri")
+    st.write("### Ürün Bazlı Sipariş Adetleri (Özel Sıralı)")
 
     with st.form("order_entry_form"):
       entered_orders = {}
@@ -164,7 +246,6 @@ with tab2:
         new_rows = []
         str_date = order_date.strftime("%Y-%m-%d")
 
-        # Aynı tarihe ait eski kayıtlar varsa temizleyelim
         if not df_orders.empty:
           df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
 
@@ -180,7 +261,6 @@ with tab2:
           new_df = pd.DataFrame(new_rows)
           new_df["Tarih"] = pd.to_datetime(new_df["Tarih"])
           df_orders = pd.concat([df_orders, new_df], ignore_index=True)
-          # Kaydederken tarihi string yapalım
           df_orders_save = df_orders.copy()
           df_orders_save["Tarih"] = df_orders_save["Tarih"].dt.strftime(
               "%Y-%m-%d"
@@ -197,7 +277,6 @@ with tab3:
   st.subheader("📂 Arşiv, Geçmiş Siparişler ve Filtreleme")
 
   if not df_orders.empty:
-    # Filtreleme Alanları
     st.write("### 🔍 Arşivde Filtreleme ve Arama")
     f_col1, f_col2 = st.columns(2)
 
@@ -213,7 +292,6 @@ with tab3:
           "Ürün Adına Göre Ara (Örn: Baton, Çikolatalı)"
       )
 
-    # Filtreleme Mantığı
     filtered_df = df_orders.copy()
     if isinstance(date_range, tuple) and len(date_range) == 2:
       start_date, end_date = date_range
@@ -228,7 +306,6 @@ with tab3:
           .str.contains(search_product, case=False, na=False)
       ]
 
-    # Tarihi ekranda daha şık gösterebilmek için formatlayalım
     display_df = filtered_df.copy()
     display_df["Tarih"] = display_df["Tarih"].dt.strftime("%d.%m.%Y")
 
@@ -245,7 +322,6 @@ with tab3:
       )
 
       if st.button("🗑️ Seçilen Tarihe Ait Tüm Kayıtları Sil"):
-        # Tarihi tekrar YYYY-MM-DD formatına çevirip siliyoruz
         dt_obj = pd.to_datetime(selected_del_date_str, format="%d.%m.%Y")
         df_orders = df_orders[df_orders["Tarih"] != dt_obj]
 
