@@ -35,7 +35,6 @@ def load_historical_data():
   if os.path.exists(historical_excel_file):
     try:
       xls_h = pd.ExcelFile(historical_excel_file)
-      # İlk sayfayı veya uygun sayfayı okuyalım
       sheet_name = xls_h.sheet_names[0]
       df_h = xls_h.parse(sheet_name)
       return df_h, sheet_name
@@ -128,7 +127,7 @@ def fetch_3day_evening_weather():
 
 three_day_forecast = fetch_3day_evening_weather()
 
-# SEKME YAPISI (Geçmiş Arşiv Sekmesi Eklendi)
+# SEKME YAPISI
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
     "📝 Günlük Sipariş Girişi",
@@ -275,58 +274,48 @@ with tab1:
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- GELİŞTİRİLMİŞ AKILLI YÖNETİCİ ÖZETİ (GEÇMİŞ YIL KIYASLAMALI) ---
+      # --- GELİŞTİRİLMİŞ AKILLI YÖNETİCİ ÖZETİ (GÜNCELLENMİŞ TARİH EŞLEŞTİRME) ---
       historical_insight_text = (
-          "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) henüz okunamadı veya boş."
+          "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) okunamadı."
       )
       if df_history is not None:
         try:
-          # Geçmiş veride bugünün tarihine denk gelen (örneğin geçen yılın aynı ayı/günü) veriyi bulmaya çalışalım
           target_month = selected_date.month
           target_day = selected_date.day
-          # Tarih içeren sütun bulma
-          date_col_candidates = [
-              c
-              for c in df_history.columns
-              if "tarih" in str(c).lower() or "date" in str(c).lower()
+
+          # Dosyadaki ilk sütunu doğrudan tarih sütunu olarak kabul edelim (Kusursuz eşleşme için)
+          date_col = df_history.columns[0]
+          df_history["Parsed_Date"] = pd.to_datetime(
+              df_history[date_col], errors="coerce"
+          )
+
+          matched_hist = df_history[
+              (df_history["Parsed_Date"].dt.month == target_month)
+              & (df_history["Parsed_Date"].dt.day == target_day)
           ]
-          if date_col_candidates:
-            d_col = date_col_candidates[0]
-            df_history["Parsed_Date"] = pd.to_datetime(
-                df_history[d_col], errors="coerce"
-            )
-            matched_hist = df_history[
-                (df_history["Parsed_Date"].dt.month == target_month)
-                & (df_history["Parsed_Date"].dt.day == target_day)
-            ]
-            if not matched_hist.empty:
-              # Sayısal sütunlardan toplamı bul
-              num_cols = df_history.select_dtypes(
-                  include=["number", "float", "int"]
-              ).columns
-              if not num_cols.empty:
-                hist_val = int(matched_hist[num_cols[0]].sum())
-                historical_insight_text = (
-                    f"Geçen yıl bugün ({target_day}.{target_month}.2025) toplam"
-                    f" **{hist_val} adet** satış gerçekleşmişti. Bu yıl aynı"
-                    f" dönem için önerilen toplam üretim **{subtotal} adet**"
-                    " olarak hesaplandı."
-                )
-              else:
-                historical_insight_text = (
-                    "Geçmiş yıl verisinde uygun satış adeti sütunu"
-                    " bulunamadı."
-                )
+          if not matched_hist.empty:
+            # Sayısal sütunlardan toplamı bul (tarih sütunu hariç diğer sütunların toplamı veya ilk sayısal sütun)
+            num_cols = df_history.select_dtypes(
+                include=["number", "float", "int"]
+            ).columns
+            if not num_cols.empty:
+              hist_val = int(matched_hist[num_cols].sum().sum())
+              historical_insight_text = (
+                  f"Geçen yıl bugün ({target_day}.{target_month}.2025) toplam"
+                  f" **{hist_val} adet** satış gerçekleşmişti. Bu yıl aynı"
+                  f" dönem için önerilen toplam üretim **{subtotal} adet**"
+                  " olarak hesaplandı."
+              )
             else:
               historical_insight_text = (
-                  f"Geçmiş yıl arşivinde {target_day}.{target_month} tarihine"
-                  " ait tam eşleşen kayıt bulunamadı, ancak genel trend"
-                  " entegre edildi."
+                  "Geçmiş yıl verisinde uygun satış adeti sütunu"
+                  " bulunamadı."
               )
           else:
             historical_insight_text = (
-                "Geçmiş yıl arşiv dosyası yüklendi ancak tarih sütunu tespit"
-                " edilemedi."
+                f"Geçmiş yıl arşivinde {target_day}.{target_month} tarihine"
+                " ait tam eşleşen kayıt bulunamadı, ancak genel trend"
+                " entegre edildi."
             )
         except Exception as ex:
           historical_insight_text = (
@@ -466,7 +455,7 @@ with tab2:
           st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
 
 with tab3:
-  st.subheader("📂 Arşiv ve Matris Tablo")
+  st.subheader("📂 Arşiv & Matris Tablo")
   if not df_orders.empty:
     st.markdown("---")
     st.subheader("✏️ Geçmiş Gün Verisini Düzenle")
@@ -689,7 +678,7 @@ with tab3:
 with tab4:
   st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
   if df_history is not None:
-    st.success(f"✅ Arşiv başarıyla yüklendi!")
+    st.success("✅ Arşiv başarıyla yüklendi ve okundu!")
     st.dataframe(df_history, use_container_width=True, height=550)
   else:
     st.warning(
