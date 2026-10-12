@@ -289,7 +289,7 @@ with tab1:
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- DÜZELTİLMİŞ AKILLI YÖNETİCİ ÖZETİ (MANTIKLI KIYASLAMA) ---
+      # --- PROFESYONEL VE NET YÖNETİCİ ÖZETİ ---
       historical_insight_text = (
           "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) okunamadı."
       )
@@ -343,15 +343,19 @@ with tab1:
                 past_weather_query_date
             )
 
+            buffer_text = (
+                f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
+            )
+
             if hist_val > 0:
               historical_insight_text = (
                   f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
                   f" {week_of_month}. haftasının {days_tr.get(day_of_week,'')}"
                   f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
-                  f" O gün hava **{past_weather_info}** idi. Bu yılki güncel"
-                  f" talep yapısı, seçilen hava koşulları ve %{buffer_pct} güvenlik"
-                  f" payı değerlendirilerek bugünkü üretim hedefiniz"
-                  f" **{subtotal} adet** olarak optimize edilmiştir."
+                  f" O gün hava **{past_weather_info}** idi. Güncel şube"
+                  f" talepleri, hava koşulları{buffer_text} dikkate alınarak"
+                  f" bugünkü üretim hedefiniz **{subtotal} adet** olarak"
+                  " optimize edilmiştir."
               )
             else:
               historical_insight_text = (
@@ -370,15 +374,12 @@ with tab1:
 
       st.markdown("---")
       st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Akıllı Eşleştirme Analizi**\n\n"
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti**\n\n"
           f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
           f" (Ayın {week_of_month}. haftası) için **{special_day}** ve hava"
           f" koşulu **'{weather_condition}'** ({temperature}°C) baz"
-          f" alınmıştır.\n- **Geçmiş Yıl Karşılaştırması:**"
-          f" {historical_insight_text}\n- **Operasyonel Öneri:** Takvim gün"
-          f" sapmaları elimine edilerek, ayın aynı dönemindeki benzer gün"
-          f" talebi ve güvenlik payı (%{buffer_pct}) ile toplam **{subtotal}"
-          " adet** üretim optimize edilmiştir."
+          f" alınmıştır.\n- **Analiz & Karşılaştırma:**"
+          f" {historical_insight_text}"
       )
 
     else:
@@ -551,187 +552,3 @@ with tab3:
                     "Çok Yağmurlu",
                     "Çok Bulutlu",
                 ].index(current_w_val)
-                if current_w_val
-                in [
-                    "Açık",
-                    "Bulutlu",
-                    "Hafif Çisenti",
-                    "Hafif Yağmurlu",
-                    "Çok Yağmurlu",
-                    "Çok Bulutlu",
-                ]
-                else 0
-            ),
-            key="edit_w_sel",
-        )
-      with col_e2:
-        edit_temp = st.number_input(
-            "Sıcaklık (°C) Güncelle",
-            min_value=-10,
-            max_value=45,
-            value=current_t_val,
-            step=1,
-            key="edit_t_sel",
-        )
-
-      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
-      with st.form("edit_record_form"):
-        updated_qtys = {}
-        for _, row in day_records.iterrows():
-          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
-              f"{row['Pasta Çeşidi']}",
-              min_value=0,
-              max_value=500,
-              value=int(row["Gerçekleşen Sipariş"]),
-              step=1,
-          )
-        if st.form_submit_button("🔄 Güncelle"):
-          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
-          new_edit_rows = [
-              {
-                  "Tarih": dt_edit_obj,
-                  "Pasta Çeşidi": p,
-                  "Gerçekleşen Sipariş": q,
-              }
-              for p, q in updated_qtys.items()
-              if q > 0
-          ]
-          if new_edit_rows:
-            df_orders = pd.concat(
-                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
-            )
-            df_orders.to_csv(csv_archive_file, index=False)
-
-          if os.path.exists(csv_weather_file):
-            df_w_up = pd.read_csv(csv_weather_file)
-            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
-            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
-          else:
-            df_w_up = pd.DataFrame(
-                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
-            )
-          new_w_row = pd.DataFrame([{
-              "Tarih": dt_edit_obj,
-              "Hava Durumu": edit_weather,
-              "Sıcaklık (°C)": f"{edit_temp}°C",
-          }])
-          updated_weather_df = pd.concat(
-              [df_w_up, new_w_row], ignore_index=True
-          )
-          updated_weather_df.to_csv(csv_weather_file, index=False)
-          st.success("✅ Güncellendi!")
-          st.rerun()
-
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO ---
-  st.markdown("---")
-  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
-
-  if df_all is not None:
-    master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
-    product_col_name = master_df.columns[0]
-    master_df = master_df[
-        ~master_df[product_col_name]
-        .astype(str)
-        .str.upper()
-        .str.contains("TOPLAM", na=False)
-    ]
-
-    weather_dict = {}
-    if not df_weather.empty:
-      for _, w_row in df_weather.iterrows():
-        d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
-        w_cond = w_row.get("Hava Durumu", "Açık")
-        t_val = str(w_row.get("Sıcaklık (°C)", "20")).replace("°C", "").strip()
-        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
-
-    if not df_orders.empty:
-      df_orders["Clean_Product"] = (
-          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
-      )
-      pivot_orders = df_orders.pivot_table(
-          index="Clean_Product",
-          columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
-          values="Gerçekleşen Sipariş",
-          aggfunc="sum",
-      ).fillna(0)
-
-      master_df["Clean_Product"] = (
-          master_df[product_col_name].astype(str).str.strip().str.upper()
-      )
-
-      for date_col in pivot_orders.columns:
-        if date_col not in master_df.columns:
-          master_df[date_col] = 0
-        mapping_dict = pivot_orders[date_col].to_dict()
-        master_df[date_col] = (
-            master_df["Clean_Product"].map(mapping_dict).fillna(0)
-        )
-
-      master_df = master_df.drop(columns=["Clean_Product"])
-
-    rename_cols = {}
-    date_row_data = {product_col_name: "TARİH"}
-
-    for col in master_df.columns:
-      if col != product_col_name:
-        col_str = str(col).split()[0]
-        try:
-          formatted_date_str = pd.to_datetime(col_str).strftime("%d.%m.%y")
-        except:
-          formatted_date_str = col_str
-
-        if col_str in weather_dict:
-          new_header = weather_dict[col_str]
-          rename_cols[col] = new_header
-          date_row_data[new_header] = formatted_date_str
-        else:
-          rename_cols[col] = str(col)
-          date_row_data[str(col)] = formatted_date_str
-
-    master_df = master_df.rename(columns=rename_cols)
-    master_df = pd.concat(
-        [pd.DataFrame([date_row_data]), master_df], ignore_index=True
-    )
-
-    total_row_data = {product_col_name: "TOPLAM PASTA SAYISI"}
-    for col in master_df.columns:
-      if col != product_col_name:
-        numeric_col = pd.to_numeric(master_df[col].iloc[1:], errors="coerce")
-        if not numeric_col.isna().all():
-          total_row_data[col] = int(numeric_col.sum())
-        else:
-          total_row_data[col] = 0
-
-    master_df = pd.concat(
-        [master_df, pd.DataFrame([total_row_data])], ignore_index=True
-    )
-
-    for col in master_df.columns:
-      if col != product_col_name:
-        try:
-          temp_num = pd.to_numeric(master_df[col], errors="coerce")
-          if not temp_num.isna().all():
-            mask = master_df.index != 0
-            master_df.loc[mask, col] = (
-                temp_num[mask].fillna(0).astype(int).astype(str)
-            )
-            master_df.loc[master_df.index == 0, col] = date_row_data.get(
-                col, master_df.loc[0, col]
-            )
-        except:
-          pass
-
-    st.dataframe(master_df, use_container_width=True, height=500)
-
-with tab4:
-  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
-  if df_history is not None:
-    st.success("✅ Arşiv başarıyla yüklendi ve okundu!")
-    st.dataframe(df_history, use_container_width=True, height=550)
-  else:
-    st.warning(
-        "⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı veya okunamadı. Lütfen"
-        " dosyanın ana klasörde olduğundan emin olun."
-    )
-    if hist_info:
-      st.info(f"Detay: {hist_info}")
