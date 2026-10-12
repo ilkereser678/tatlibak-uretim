@@ -372,7 +372,7 @@ with tab3:
           st.success("✅ Güncellendi!")
           st.rerun()
 
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (KÜSURATSIZ VE TAM SAYI FORMATI) ---
+  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (HATASIZ VE KÜSURATSIZ) ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
 
@@ -454,25 +454,22 @@ with tab3:
           if not numeric_col.isna().all():
             master_df.loc[total_row_mask, col] = int(numeric_col.sum())
 
-    # --- KÜSURATLARI VE .0 İFADELERİNİ TAMAMEN KALDIRMA ---
+    # Sayısal sütunlardaki .0 küsuratlarını tamamen kaldırmak için güvenli Int64 dönüşümü
     for col in master_df.columns:
       if col != product_col_name:
-        # Önce sayısal formata çevir, NaN olanları (tarih satırı vb.) orijinalinde bırak
-        numeric_series = pd.to_numeric(master_df[col], errors="coerce")
-        # Null olmayan sayıları integer'a çevirip string yapıyoruz (böylece .0 görünmez)
-        master_df[col] = numeric_series.apply(
-            lambda x: str(int(x)) if pd.notnull(x) else master_df.loc[x.index if hasattr(x, 'index') else master_df.index, col] if False else master_df[col]
-        )
-        
-        # Daha temiz bir döngü ile hücre bazlı dönüştürme:
-        for idx in master_df.index:
-          val = master_df.loc[idx, col]
-          try:
-            # Eğer sayıya dönüşebiliyorsa tam sayı yapalım (TARİH satırı hariç)
-            if idx != 0 and pd.notnull(val) and str(val).strip() != "":
-              num_val = float(val)
-              master_df.loc[idx, col] = int(num_val)
-          except:
-            pass
+        # Önce sayısal değerlere dönüştürebildiklerimizi çevirip nullable integer tipine (Int64) alıyoruz
+        try:
+          temp_num = pd.to_numeric(master_df[col], errors="coerce")
+          if not temp_num.isna().all():
+            # Tarih satırı (0. indeks) hariç geri kalanları tam sayı yapıyoruz
+            mask = master_df.index != 0
+            master_df.loc[mask, col] = (
+                temp_num[mask].fillna(0).astype(int).astype(str)
+            )
+            master_df.loc[master_df.index == 0, col] = date_row_data.get(
+                col, master_df.loc[0, col]
+            )
+        except:
+          pass
 
     st.dataframe(master_df, use_container_width=True, height=500)
