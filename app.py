@@ -416,38 +416,4 @@ with tab2:
         "SIFIR BOY PASTA MEYVELİ",
         "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
         "ORTA TURTA ÇİLEKLİ OREO PASTA",
-        "SIFIR TURTA ÇİLEKLİ OREO PASTA",
-    ]
-    excel_products = [
-        p
-        for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
-        if "TOPLAM" not in p.strip().upper()
-    ]
-    products_list = [p for p in desired_order if p in excel_products]
-    for p in excel_products:
-      if p not in products_list:
-        products_list.append(p)
-
-    order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
-    st.markdown("---")
-    st.markdown("🌤️ **O Günün Hava & Çevre Koşulları**")
-    entry_weather = st.selectbox(
-        "Hava Durumu",
-        [
-            "Açık",
-            "Bulutlu",
-            "Hafif Çisenti",
-            "Hafif Yağmurlu",
-            "Çok Yağmurlu",
-            "Çok Bulutlu",
-        ],
-        key="entry_weather",
-    )
-    entry_temp = st.number_input(
-        "Sıcaklık (°C)", min_value=-10, max_value=45, value=20, step=1, key="entry_temp"
-    )
-
-    st.markdown("---")
-    with st.form("order_entry_form"):
-      entered_orders = {}
-      for idx,
+        "SI
