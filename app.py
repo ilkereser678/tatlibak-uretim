@@ -352,13 +352,4 @@ with tab3:
 
       col_e1, col_e2 = st.columns(2)
       with col_e1:
-        edit_weather = st.selectbox(
-            "Hava Durumu Güncelle",
-            [
-                "Açık",
-                "Bulutlu",
-                "Hafif Çisenti",
-                "Hafif Yağmurlu",
-                "Çok Yağmurlu",
-                "Çok Bulutlu",
-            ],
+        edit_weather = st.selectbox
