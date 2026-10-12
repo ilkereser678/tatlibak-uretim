@@ -350,24 +350,4 @@ with tab3:
           except:
             current_t_val = 20
 
-      col_e1, col_e2 = st.columns(2)
-      with col_e1:
-        edit_weather = st.selectbox(
-            "Hava Durumu Güncelle",
-            [
-                "Açık",
-                "Bulutlu",
-                "Hafif Çisenti",
-                "Hafif Yağmurlu",
-                "Çok Yağmurlu",
-                "Çok Bulutlu",
-            ],
-            index=0,
-            key="edit_w_sel",
-        )
-      with col_e2:
-        edit_temp = st.number_input(
-            "Sıcaklık (°C) Güncelle",
-            min_value=-10,
-            max_value=45,
-            value=current_t_
+      col_e1, col_
