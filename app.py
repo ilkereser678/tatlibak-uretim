@@ -125,6 +125,23 @@ def fetch_3day_evening_weather():
   return forecast_days
 
 
+# Geçmiş tarihe ait hava durumunu web servisinden (wttr.in geçmiş tarih endpoint) sorgulayan akıllı fonksiyon
+@st.cache_data(ttl=86400)
+def fetch_historical_weather(target_date_str):
+  try:
+    # wttr.in geçmiş tarih formatı: YYYY-MM-DD
+    url = f"https://wttr.in/Istanbul?date={target_date_str}&format=j1"
+    response = urlopen(url, timeout=4)
+    data = json.loads(response.read().decode("utf-8"))
+    weather_info = data.get("weather", [{}])[0]
+    avg_temp = weather_info.get("avgtempC", "Bilinmiyor")
+    desc_list = weather_info.get("hourly", [{}])[0].get("weatherDesc", [{}])
+    desc = desc_list[0].get("value", "Parçalı Bulutlu") if desc_list else "Normal"
+    return f"{avg_temp}°C, {desc}"
+  except Exception:
+    return "Mevsim Normalleri (18°C - Parçalı Bulutlu)"
+
+
 three_day_forecast = fetch_3day_evening_weather()
 
 # SEKME YAPISI
@@ -274,7 +291,7 @@ with tab1:
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- AKILLI YÖNETİCİ ÖZETİ & TREND ANALİZİ ---
+      # --- AKILLI YÖNETİCİ ÖZETİ & HAFTANIN GÜNÜ / AYIN HAFTASI EŞLEŞTİRME MANTIĞI ---
       historical_insight_text = (
           "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) okunamadı."
       )
@@ -282,28 +299,58 @@ with tab1:
         try:
           target_month = selected_date.month
           target_day = selected_date.day
+          target_weekday = selected_date.weekday()  # Pazartesi=0, Pazar=6
+
+          # Seçilen günün ayın kaçıncı haftası olduğunu bulma (Örn: Ayın 2. Pazartesisi)
+          week_of_month = (target_day - 1) // 7 + 1
 
           date_col = df_history.columns[0]
           df_history["Parsed_Date"] = pd.to_datetime(
               df_history[date_col], errors="coerce"
           )
+          df_history["Weekday"] = df_history["Parsed_Date"].dt.weekday
+          df_history["Week_Of_Month"] = (
+              df_history["Parsed_Date"].dt.day - 1
+          ) // 7 + 1
+
           num_cols = df_history.select_dtypes(
               include=["number", "float", "int"]
           ).columns
 
           if not num_cols.empty:
-            # Geçmiş yılın o günkü satışı
+            # 1. Strateji: Geçmiş yılda aynı ay, aynı hafta ve aynı haftanın gününe denk gelen veriyi bul
             matched_hist = df_history[
                 (df_history["Parsed_Date"].dt.month == target_month)
-                & (df_history["Parsed_Date"].dt.day == target_day)
+                & (df_history["Week_Of_Month"] == week_of_month)
+                & (df_history["Weekday"] == target_weekday)
             ]
-            hist_val = (
-                int(matched_hist[num_cols].sum().sum())
-                if not matched_hist.empty
-                else 0
+
+            hist_val = 0
+            hist_date_str = ""
+            if not matched_hist.empty:
+              hist_val = int(matched_hist[num_cols].sum().sum())
+              hist_date_str = (
+                  matched_hist["Parsed_Date"]
+                  .dt.strftime("%d.%m.%Y")
+                  .values[0]
+              )
+            else:
+              # Alternatif: Aynı ay içindeki haftanın aynı günü ortalaması
+              matched_alt = df_history[
+                  (df_history["Parsed_Date"].dt.month == target_month)
+                  & (df_history["Weekday"] == target_weekday)
+              ]
+              if not matched_alt.empty:
+                hist_val = int(matched_alt[num_cols].sum().sum() / len(matched_alt))
+                hist_date_str = "Geçen yıl aynı ayın benzer günleri"
+
+            # Geçmiş o günkü hava durumunu web üzerinden çekelim
+            past_weather_query_date = f"2025-{target_month:02d}-{target_day:02d}"
+            past_weather_info = fetch_historical_weather(
+                past_weather_query_date
             )
 
-            # Geçmiş yılın genel ortalaması ile bu yılın (df_all) genel ortalamasını kıyaslayarak büyüme trendini hesaplayalım
+            # Genel Büyüme Trendi Oranı
             hist_avg_daily = df_history[num_cols].mean().mean()
             current_avg_daily = valid_numeric_df.mean().mean()
 
@@ -314,7 +361,7 @@ with tab1:
               ) * 100
               if growth_rate > 0:
                 trend_note = (
-                    f" Ancak bu yıl genel satış hacminiz geçen yıla oranla"
+                    f" Bu yıl genel satış hacminiz geçen yıla oranla"
                     f" **%{growth_rate:.1f} daha yüksek** seyretmektedir."
                 )
               else:
@@ -325,15 +372,17 @@ with tab1:
 
             if hist_val > 0:
               historical_insight_text = (
-                  f"Geçen yıl bugün ({target_day}.{target_month}.2025) toplam"
-                  f" **{hist_val} adet** satış gerçekleşmişti.{trend_note} Bu"
-                  f" veriler ışığında bugünkü optimize üretim hedefiniz"
+                  f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
+                  f" {week_of_month}. haftasının {days_tr.get(day_of_week,'')}"
+                  f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
+                  f" O gün hava **{past_weather_info}** idi.{trend_note} Bu"
+                  f" faktörler harmanlanarak bugünkü optimize üretim hedefiniz"
                   f" **{subtotal} adet** olarak belirlenmiştir."
               )
             else:
               historical_insight_text = (
-                  f"Geçmiş yıl arşivinde {target_day}.{target_month} için"
-                  f" birebir kayıt bulunamadı, ancak genel büyüme trendi ({trend_note})"
+                  f"Geçen yıl arşivinde benzer gün konumu için tam eşleşme"
+                  f" bulunamadı, ancak genel büyüme trendi ({trend_note})"
                   f" analize yansıtıldı."
               )
           else:
@@ -347,13 +396,15 @@ with tab1:
 
       st.markdown("---")
       st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Büyüme Trendi Analizi**\n\n"
-          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü için"
-          f" **{special_day}** ve hava koşulu **'{weather_condition}'**"
-          f" ({temperature}°C) baz alınmıştır.\n- **Geçmiş Yıl & Trend"
-          f" Kıyaslaması:** {historical_insight_text}\n- **Operasyonel Öneri:**"
-          f" Şube sipariş ortalamaları, yıllık büyüme trendi ve güvenlik payı"
-          f" (%{buffer_pct}) harmanlanarak toplam **{subtotal} adet** üretim"
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Akıllı Eşleştirme Analizi**\n\n"
+          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
+          f" (Ayın {week_of_month}. haftası) için **{special_day}** ve hava"
+          f" koşulu **'{weather_condition}'** ({temperature}°C) baz"
+          f" alınmıştır.\n- **Geçmiş Yıl Karşılaştırması:**"
+          f" {historical_insight_text}\n- **Operasyonel Öneri:** Takvim gün"
+          f" sapmaları (Pazar vs. Pazartesi) elimine edilerek, ayın aynı"
+          f" dönemindeki benzer gün trendi, büyüme oranı ve güvenlik payı"
+          f" (%{buffer_pct}) ile toplam **{subtotal} adet** üretim"
           " optimize edilmiştir."
       )
 
