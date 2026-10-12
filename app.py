@@ -227,11 +227,14 @@ with tab2:
 
     with st.form("order_entry_form"):
       entered_orders = {}
-      # TEK SÜTUN: TAB tuşuyla yukarıdan aşağıya hızlıca geçiş imkanı sağlar
       for idx, prod in enumerate(products_list):
         entered_orders[prod] = st.number_input(
             f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
         )
+
+      # Anlık toplam hesaplama (Form içinde gösterim için)
+      current_total = sum(entered_orders.values())
+      st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
 
       submit_order = st.form_submit_button(
           "💾 Gerçekleşen Siparişleri Kalıcı Olarak Kaydet"
@@ -262,14 +265,15 @@ with tab2:
           )
           df_orders_save.to_csv(csv_archive_file, index=False)
           st.success(
-              f"✅ {order_date.strftime('%d.%m.%Y')} tarihli siparişler arşive"
-              " başarıyla kaydedildi!"
+              f"✅ {order_date.strftime('%d.%m.%Y')} tarihli toplam"
+              f" **{current_total}** adet sipariş arşive başarıyla"
+              " kaydedildi!"
           )
         else:
           st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
 
 with tab3:
-  st.subheader("📂 Arşiv, Geçmiş Siparişler ve Filtreleme")
+  st.subheader("📂 Arşiv, Geçmiş Siparişler ve Birleştirilmiş Matris Tablo")
 
   if not df_orders.empty:
     st.write("### 🔍 Arşivde Filtreleme ve Arama")
@@ -305,8 +309,8 @@ with tab3:
     display_df["Tarih"] = display_df["Tarih"].dt.strftime("%d.%m.%Y")
 
     st.markdown("---")
-    st.write("### 📊 Filtrelenmiş Sipariş Arşivi")
-    st.dataframe(display_df, use_container_width=True, height=400)
+    st.write("### 📊 Filtrelenmiş Günlük Sipariş Arşivi")
+    st.dataframe(display_df, use_container_width=True, height=350)
 
     st.markdown("---")
     st.write("### 🗑️ Kayıt Düzenleme / Silme")
@@ -329,13 +333,37 @@ with tab3:
             f"✅ {selected_del_date_str} tarihli kayıtlar arşivden silindi!"
         )
         st.rerun()
-  else:
-    st.info(
-        "Henüz arşive kaydedilmiş günlük sipariş bulunmuyor. 'Günlük Sipariş"
-        " Girişi' sekmesinden veri ekleyebilirsiniz."
-    )
 
+  # --- YENİ: Orijinal Excel ile Yeni Girilen CSV Verilerini Birleştiren Ana Matris Tablo ---
   st.markdown("---")
-  st.subheader("📂 Orijinal Excel Dosyası Arşivi")
+  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Girilenler)")
+
   if df_all is not None:
-    st.dataframe(df_all, use_container_width=True, height=400)
+    # Orijinal Excel yapısını baz alalım
+    master_df = df_all.copy()
+
+    # Eğer günlük siparişlerde kayıt varsa, bunları Excel formatındaki matrise sütun olarak ekleyelim
+    if not df_orders.empty:
+      # df_orders içindeki verileri pivot yaparak ürün x tarih matrisine çevirelim
+      pivot_orders = df_orders.pivot_table(
+          index="Pasta Çeşidi",
+          columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
+          values="Gerçekleşen Sipariş",
+          aggfunc="sum",
+      ).fillna(0)
+
+      # Ana tabloya (master_df) bu yeni tarih sütunlarını entegre edelim
+      # Excel'in ilk sütunu ürün adıdır (örneğin 0. index)
+      product_col_name = master_df.columns[0]
+
+      # Pivot tablodaki yeni tarihleri ana tabloya ekleyelim
+      for date_col in pivot_orders.columns:
+        # Eğer bu tarih zaten Excel'de yoksa sütun olarak ekleyelim
+        if date_col not in master_df.columns:
+          # Ürün eşleştirmesi yaparak değerleri yerleştirelim
+          mapped_vals = master_df[product_col_name].map(
+              pivot_orders[date_col]
+          ).fillna(0)
+          master_df[date_col] = mapped_vals
+
+    st.dataframe(master_df, use_container_width=True, height=450)
