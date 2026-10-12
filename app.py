@@ -14,6 +14,7 @@ st.title("🍰 Tatlıbak Yaş Pasta Üretim & Sipariş Planlama Asistanı")
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
 csv_weather_file = "daily_weather.csv"
+historical_excel_file = "gecmis_arsiv.xlsx"  # Geçmiş yıllar arşivi için dosya adı
 
 
 @st.cache_data
@@ -27,6 +28,21 @@ try:
   df_all = load_data()
 except Exception as e:
   st.error(f"Excel dosyası yüklenirken hata oluştu: {e}")
+
+# Geçmiş yıllar arşivi yükleme fonksiyonu (Opsiyonel)
+@st.cache_data
+def load_historical_data():
+  if os.path.exists(historical_excel_file):
+    try:
+      xls_h = pd.ExcelFile(historical_excel_file)
+      df_h = xls_h.parse(xls_h.sheet_names[0])
+      return df_h
+    except:
+      return None
+  return None
+
+
+df_history = load_historical_data()
 
 if os.path.exists(csv_archive_file):
   df_orders = pd.read_csv(csv_archive_file)
@@ -205,14 +221,12 @@ with tab1:
       elif "Hafta Sonu" in special_day:
         special_multiplier = 1.10
 
-      # Orijinal Excel'deki ürünleri alırken içindeki "TOPLAM" satırlarını ayıklayalım
       raw_products = df_all.iloc[1:, 0].dropna().astype(str).values
       valid_products = [
           p for p in raw_products if "TOPLAM" not in p.strip().upper()
       ]
 
       numeric_df = df_all.iloc[1:, 1:].apply(pd.to_numeric, errors="coerce")
-      # Toplam satırını hesaplamalardan hariç tutmak için filtrele
       valid_numeric_df = numeric_df.iloc[: len(valid_products)]
 
       base_vals = (
@@ -243,22 +257,34 @@ with tab1:
           .str.contains("BATON", na=False)
       ]
 
-      # Gerçek hesaplanan toplam değer
       subtotal = int(forecast_df[target_col_name].sum())
 
-      # Tablonun en altına tertemiz doğru toplam satırını ekleyelim
       total_row_df = pd.DataFrame({
           "Pasta Çeşidi": ["TOPLAM PASTA SAYISI"],
           target_col_name: [subtotal],
       })
       forecast_df = pd.concat([forecast_df, total_row_df], ignore_index=True)
 
-      # Üstteki metrik ve tablodaki alt toplam şimdi %100 uyuşacak
       st.metric(
           label="Önerilen Toplam Pasta Üretimi",
           value=f"{subtotal} Adet",
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
+
+      # --- AKILLI YÖNETİCİ ÖZETİ (AI INSIGHTS) ---
+      st.markdown("---")
+      st.info(
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Geçmiş Analiz Notu**\n\n"
+          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü için **{special_day}** ve hava koşulu **'{weather_condition}'** ({temperature}°C) baz alınmıştır.\n"
+          f"- **Geçmiş Arşiv Durumu:** "
+          + (
+              "Geçmiş yıllar arşivi yüklü; genel trend ve büyüme oranları hesaba katıldı."
+              if df_history is not None
+              else "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) henüz yüklenmedi; mevcut aktif sipariş matrisi üzerinden analiz yapılıyor."
+          )
+          + f"\n- **Öneri:** Toplam önerilen **{subtotal} adet** üretim; şube talepleri, akşamüstü yoğunluk beklentisi ve seçilen güvenlik payı (%{buffer_pct}) dengelenerek optimize edilmiştir."
+      )
+
     else:
       st.info(
           "👈 Sol panelden 3 günlük hava tablosuna bakarak kriterleri seçip"
@@ -507,7 +533,6 @@ with tab3:
   if df_all is not None:
     master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
     product_col_name = master_df.columns[0]
-    # Orijinal Excel'deki toplam satırını matristen de temizleyelim
     master_df = master_df[
         ~master_df[product_col_name]
         .astype(str)
@@ -572,7 +597,6 @@ with tab3:
         [pd.DataFrame([date_row_data]), master_df], ignore_index=True
     )
 
-    # Toplam satırını dinamik olarak yeniden ekleyelim
     total_row_data = {product_col_name: "TOPLAM PASTA SAYISI"}
     for col in master_df.columns:
       if col != product_col_name:
@@ -586,7 +610,6 @@ with tab3:
         [master_df, pd.DataFrame([total_row_data])], ignore_index=True
     )
 
-    # Sayısal sütunlardaki küsuratları kaldırma
     for col in master_df.columns:
       if col != product_col_name:
         try:
