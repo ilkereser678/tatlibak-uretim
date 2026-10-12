@@ -237,7 +237,7 @@ with tab1:
           .str.contains("BATON", na=False)
       ]
 
-      # --- TOPLAM SATIRI İÇİN GÜVENLİ FİLTRELEME (TOPLAM METRİĞİ HATASI GİDERİLDİ) ---
+      # Tabloya tam uyumlu olması için birebir yuvarlanmış değerlerin toplamı alınıyor
       valid_rows_for_total = forecast_df[
           ~forecast_df["Pasta Çeşidi"]
           .astype(str)
