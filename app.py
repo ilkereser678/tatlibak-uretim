@@ -523,13 +523,22 @@ with tab3:
         )
         st.rerun()
 
-  # --- KUSURSUZ MATRİS TABLO DÜZENİ ---
+  # --- MATRİS TABLO (Tarih formatı GG.AA.YY ve Son Gün Gösterim Düzeltmesi) ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Günler)")
 
   if df_all is not None:
     master_df = df_all.loc[:, ~df_all.columns.str.contains('^Unnamed')]
     product_col_name = master_df.columns[0]
+
+    # Dinamik hava durumu sözlüğünü tam ve hatasız oluşturalım
+    weather_dict = {}
+    if not df_weather.empty:
+      for _, w_row in df_weather.iterrows():
+        d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
+        w_cond = w_row.get("Hava Durumu", "Açık")
+        t_val = str(w_row.get("Sıcaklık (°C)", "20")).replace("°C", "").strip()
+        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
 
     if not df_orders.empty:
       df_orders["Clean_Product"] = (
@@ -549,30 +558,44 @@ with tab3:
 
       for date_col in pivot_orders.columns:
         if date_col not in master_df.columns:
-          mapping_dict = pivot_orders[date_col].to_dict()
-          master_df[date_col] = (
-              master_df["Clean_Product"].map(mapping_dict).fillna(0)
-          )
+          master_df[date_col] = 0
+
+        mapping_dict = pivot_orders[date_col].to_dict()
+        master_df[date_col] = (
+            master_df["Clean_Product"].map(mapping_dict).fillna(0)
+        )
 
       master_df = master_df.drop(columns=["Clean_Product"])
 
-    weather_dict = {}
-    if not df_weather.empty:
-      for _, w_row in df_weather.iterrows():
-        d_str = w_row["Tarih"].strftime("%Y-%m-%d")
-        w_cond = w_row.get("Hava Durumu", "")
-        t_val = str(w_row.get("Sıcaklık (°C)", "")).replace("°C", "").strip()
-        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
-
-    # Sütun başlıklarını sadece Hava Durumu / Sıcaklık yapıyoruz
+    # Tüm tarih sütunlarının başlıklarını "Sıcaklık - Hava Durumu" yapalım
     rename_cols = {}
+    date_row_data = {product_col_name: "TARİH"}
+
     for col in master_df.columns:
       if col != product_col_name:
-        col_str = str(col).split()[0]
-        if col_str in weather_dict:
-          rename_cols[col] = weather_dict[col_str]
+        # Kolon adından saat bilgisini temizleyip düzgün tarih formatı elde edelim
+        col_clean = str(col).split()[0]
+        # YYYY-MM-DD formatını GG.AA.YY formatına çevirelim (Örn: 10.10.26)
+        try:
+          dt_parsed = pd.to_datetime(col_clean)
+          formatted_date_str = dt_parsed.strftime("%d.%m.%y")
+        except:
+          formatted_date_str = col_clean
+
+        if col_clean in weather_dict:
+          new_header = weather_dict[col_clean]
+          rename_cols[col] = new_header
+          date_row_data[new_header] = formatted_date_str
+        else:
+          # Eski Excel kolonları için
+          rename_cols[col] = str(col)
+          date_row_data[str(col)] = formatted_date_str
 
     master_df = master_df.rename(columns=rename_cols)
+
+    # Tarih satırını ilk satır olarak ekleyelim
+    date_df_row = pd.DataFrame([date_row_data])
+    master_df = pd.concat([date_df_row, master_df], ignore_index=True)
 
     # Toplam satırını otomatik güncelleme
     total_row_mask = (
