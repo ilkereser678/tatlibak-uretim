@@ -138,9 +138,9 @@ with tab1:
           else f"Tahmini Üretim (%{buffer_pct} Stoklu + Akıllı Etki)"
       )
 
+      # --- BAZ ORTALAMA SÜTUNU KALDIRILDI, SADECE TAHMİNİ ÜRETİM BIRAKILDI ---
       forecast_df = pd.DataFrame({
           "Pasta Çeşidi": products,
-          "Baz Ortalama": base_vals.round().astype(int),
           target_col_name: forecast_vals,
       })
       forecast_df = forecast_df.dropna(subset=["Pasta Çeşidi"])
@@ -150,9 +150,11 @@ with tab1:
           .str.contains("BATON", na=False)
       ]
 
+      total_forecast = int(forecast_df[target_col_name].sum())
+
       st.metric(
           label="Önerilen Toplam Pasta Üretimi",
-          value=f"{int(forecast_df[target_col_name].sum())} Adet",
+          value=f"{total_forecast} Adet",
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
     else:
@@ -372,7 +374,7 @@ with tab3:
           st.success("✅ Güncellendi!")
           st.rerun()
 
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (HATASIZ VE KÜSURATSIZ) ---
+  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
 
@@ -454,14 +456,12 @@ with tab3:
           if not numeric_col.isna().all():
             master_df.loc[total_row_mask, col] = int(numeric_col.sum())
 
-    # Sayısal sütunlardaki .0 küsuratlarını tamamen kaldırmak için güvenli Int64 dönüşümü
+    # Sayısal sütunlardaki küsuratları kaldırma
     for col in master_df.columns:
       if col != product_col_name:
-        # Önce sayısal değerlere dönüştürebildiklerimizi çevirip nullable integer tipine (Int64) alıyoruz
         try:
           temp_num = pd.to_numeric(master_df[col], errors="coerce")
           if not temp_num.isna().all():
-            # Tarih satırı (0. indeks) hariç geri kalanları tam sayı yapıyoruz
             mask = master_df.index != 0
             master_df.loc[mask, col] = (
                 temp_num[mask].fillna(0).astype(int).astype(str)
