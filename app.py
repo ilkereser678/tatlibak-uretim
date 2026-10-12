@@ -3,13 +3,32 @@ import json
 import os
 from urllib.request import urlopen
 import pandas as pd
+from google import genai
 import streamlit as st
 
 st.set_page_config(
-    page_title="Tatlıbak Üretim Planlama Asistanı", page_icon="🍰", layout="wide"
+    page_title="Tatlıbak AI Üretim Planlama Asistanı",
+    page_icon="🍰",
+    layout="wide",
 )
 
-st.title("🍰 Tatlıbak Yaş Pasta Üretim & Sipariş Planlama Asistanı")
+st.title("🍰 Tatlıbak Yaş Pasta AI Üretim & Sipariş Planlama Asistanı")
+
+# --- GEMINI API YAPILANDIRMASI ---
+# Streamlit Secrets (st.secrets["GEMINI_API_KEY"]) veya doğrudan çevre değişkeni üzerinden API anahtarını alır
+api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+
+ai_client = None
+if api_key:
+  try:
+    ai_client = genai.Client(api_key=api_key)
+  except Exception as e:
+    st.error(f"Gemini AI istemcisi başlatılamadı: {e}")
+else:
+  st.warning(
+      "⚠️ Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets veya çevre"
+      " değişkenlerine `GEMINI_API_KEY` ekleyin."
+  )
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
@@ -118,32 +137,17 @@ def fetch_3day_evening_weather():
   return forecast_days
 
 
-@st.cache_data(ttl=86400)
-def fetch_historical_weather(target_date_str):
-  try:
-    url = f"https://wttr.in/Istanbul?date={target_date_str}&format=j1"
-    response = urlopen(url, timeout=4)
-    data = json.loads(response.read().decode("utf-8"))
-    weather_info = data.get("weather", [{}])[0]
-    avg_temp = weather_info.get("avgtempC", "Bilinmiyor")
-    desc_list = weather_info.get("hourly", [{}])[0].get("weatherDesc", [{}])
-    desc = desc_list[0].get("value", "Parçalı Bulutlu") if desc_list else "Normal"
-    return f"{avg_temp}°C, {desc}"
-  except:
-    return "Mevsim Normalleri (18°C - Parçalı Bulutlu)"
-
-
 three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Üretim Tahmini & Hesaplama",
+    "🚀 AI Üretim Tahmini & Analiz",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
 ])
 
 with tab1:
-  st.subheader("Günlük Veri Girişi ve Yarınki Üretim Planı")
+  st.subheader("🤖 Gemini AI Destekli Üretim & Talep Patlaması Tahmini")
 
   if three_day_forecast:
     st.markdown("🌤️ **İstanbul 3 Günlük Akşam Yoğunluk Hava Rehberi**")
@@ -160,7 +164,7 @@ with tab1:
   col1, col2 = st.columns([1, 2])
 
   with col1:
-    selected_date = st.date_input("İşlem Tarihi")
+    selected_date = st.date_input("İşlem / Üretim Tarihi")
     day_of_week = selected_date.strftime("%A")
     days_tr = {
         "Monday": "Pazartesi",
@@ -175,209 +179,113 @@ with tab1:
 
     st.markdown("---")
     weather_condition = st.selectbox(
-        "Hava Durumu Etkisi",
+        "Hava Durumu Beklentisi",
         [
             "Açık / Güneşli (Normal)",
-            "Bulutlu / Hafif Yağmurlu (Talep Artışı +%)",
-            "Çok Yağmurlu / Fırtınalı (Talep Düşüşü -%)",
-            "Aşırı Sıcak / Güneşli (Ağır Tatlı Azalır)",
+            "Bulutlu / Hafif Yağmurlu",
+            "Çok Yağmurlu / Fırtınalı",
+            "Aşırı Sıcak",
         ],
     )
     temperature = st.slider("Beklenen Sıcaklık (°C)", -5, 40, 20, 1)
     special_day = st.selectbox(
-        "Özel Gün Durumu",
+        "Özel Durum / Maaş Dönemi",
         [
             "Normal Gün",
+            "Maaş Dönemi / Ayın 10-15 Sarmalı",
             "Yılbaşı ve Arifesi",
-            "Sevgililer Günü (14 Şubat)",
-            "Anneler Günü",
+            "Sevgililer Günü / Anneler Günü",
             "Resmi Tatil / Bayram",
-            "Hafta Sonu / Cuma Akşamı",
+            "Hafta Sonu Yoğunluğu",
         ],
     )
     buffer_pct = st.selectbox(
-        "Stok / Güvenlik Payı Ekle (%)", [0, 5, 10, 15, 20, 25], index=2
+        "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    hesapla_button = st.button("🚀 Yarın İçin Tahmini Üretim Listesi Oluştur")
+    ai_hesapla_button = st.button(
+        "🧠 Gemini AI ile Akıllı Tahmin & Üretim Planı Oluştur"
+    )
 
   with col2:
-    if hesapla_button:
-      env_mult = 1.0
-      if "Bulutlu" in weather_condition:
-        env_mult += 0.05
-      elif "Çok Yağmurlu" in weather_condition:
-        env_mult -= 0.08
-      elif "Aşırı Sıcak" in weather_condition or temperature > 30:
-        env_mult -= 0.05
-
-      spec_mult = 1.0
-      if "Yılbaşı" in special_day:
-        spec_mult = 1.40
-      elif "Sevgililer" in special_day or "Anneler" in special_day:
-        spec_mult = 1.25
-      elif "Resmi Tatil" in special_day:
-        spec_mult = 1.15
-      elif "Hafta Sonu" in special_day:
-        spec_mult = 1.10
-
-      raw_products = df_all.iloc[1:, 0].dropna().astype(str).values
-      valid_products = [
-          p for p in raw_products if "TOPLAM" not in p.strip().upper()
-      ]
-      numeric_df = df_all.iloc[1:, 1:].apply(pd.to_numeric, errors="coerce")
-      valid_numeric_df = numeric_df.iloc[: len(valid_products)]
-
-      base_vals = (
-          valid_numeric_df.mean(axis=1).fillna(0)
-          if not valid_numeric_df.empty
-          else pd.Series([0] * len(valid_products))
-      )
-
-      # --- GERÇEK ANLAMDA DALGA VE MAAŞ DÖNEMİ TESPİTİ & AKILLI TABAN REVİZYONU ---
-      surge_detected = False
-      surge_multiplier = 1.0
-
-      # 1. Kontrol: Geçmiş arşivde (±2 günlük pencerede) 2500+ talep patlaması var mı?
-      if df_history is not None:
-        try:
-          t_month, t_day = selected_date.month, selected_date.day
-          d_col = df_history.columns[0]
-          df_history["Parsed_Date"] = pd.to_datetime(
-              df_history[d_col], errors="coerce"
-          )
-          num_cols = df_history.select_dtypes(
-              include=["number", "float", "int"]
-          ).columns
-          target_dt = pd.Timestamp(2025, t_month, t_day)
-          window_matched = df_history[
-              (df_history["Parsed_Date"] >= target_dt - pd.Timedelta(days=2))
-              & (df_history["Parsed_Date"] <= target_dt + pd.Timedelta(days=2))
-          ]
-          if (
-              not window_matched.empty
-              and window_matched[num_cols].sum(axis=1).max() > 2500
-          ):
-            surge_detected = True
-        except:
-          pass
-
-      # 2. Kontrol: Son girilen gerçek siparişlerde (Tab 2) yüksek momentum var mı?
-      if not df_orders.empty:
-        recent_grouped = df_orders.groupby("Tarih")[
-            "Gerçekleşen Sipariş"
-        ].sum()
-        if not recent_grouped.empty and recent_grouped.tail(3).max() > 2500:
-          surge_detected = True
-
-      # Eğer dalga/patlama tespit edildiyse tabanı doğrudan yüksek talep seviyesine ölçekle
-      if surge_detected:
-        current_base_sum = base_vals.sum()
-        target_surge_target = 2940  # Kullanıcının belirttiği gerçek talep dalgası baz alınır
-        if current_base_sum > 0:
-          surge_multiplier = target_surge_target / current_base_sum
-
-      comb_mult = (
-          env_mult
-          * spec_mult
-          * surge_multiplier
-          * (1 + (buffer_pct / 100.0))
-      )
-      forecast_vals = (base_vals * comb_mult).round().astype(int)
-
-      target_col_name = (
-          "Tahmini Üretim (Net / Stoksuz)"
-          if buffer_pct == 0
-          else f"Tahmini Üretim (%{buffer_pct} Stoklu + Dalga Optimizasyonu)"
-      )
-      forecast_df = pd.DataFrame({
-          "Pasta Çeşidi": valid_products,
-          target_col_name: forecast_vals,
-      })
-      forecast_df = forecast_df[
-          ~forecast_df["Pasta Çeşidi"]
-          .astype(str)
-          .str.contains("BATON", na=False)
-      ]
-      subtotal = int(forecast_df[target_col_name].sum())
-
-      total_row_df = pd.DataFrame(
-          {"Pasta Çeşidi": ["TOPLAM PASTA SAYISI"], target_col_name: [subtotal]}
-      )
-      forecast_df = pd.concat([forecast_df, total_row_df], ignore_index=True)
-
-      st.metric(label="Önerilen Toplam Pasta Üretimi", value=f"{subtotal} Adet")
-      st.dataframe(forecast_df, use_container_width=True, height=450)
-
-      # Yönetici Özeti ve Dalga Raporu
-      hist_text = "Geçmiş yıl arşivi okunamadı."
-      w_month = 1
-      surge_warning = ""
-      if df_history is not None:
-        try:
-          t_month, t_day, t_weekday = (
-              selected_date.month,
-              selected_date.day,
-              selected_date.weekday(),
-          )
-          w_month = (t_day - 1) // 7 + 1
-          d_col = df_history.columns[0]
-          df_history["Parsed_Date"] = pd.to_datetime(
-              df_history[d_col], errors="coerce"
-          )
-          num_cols = df_history.select_dtypes(
-              include=["number", "float", "int"]
-          ).columns
-
-          if not num_cols.empty:
-            target_dt = pd.Timestamp(2025, t_month, t_day)
-            window_matched = df_history[
-                (df_history["Parsed_Date"] >= target_dt - pd.Timedelta(days=2))
-                & (df_history["Parsed_Date"] <= target_dt + pd.Timedelta(days=2))
-            ]
-            hist_val = (
-                int(window_matched[num_cols].sum().sum() / 5)
-                if not window_matched.empty
-                else 0
+    if ai_hesapla_button:
+      if not ai_client:
+        st.error(
+            "Gemini API anahtarı tanımlı olmadığı için AI analizi"
+            " yapılamıyor!"
+        )
+      else:
+        with st.spinner(
+            "🧠 Gemini AI geçmiş arşivi, son sipariş momentumunu ve maaş"
+            " dönemi dalgalarını analiz ediyor..."
+        ):
+          try:
+            # Arşivden ve son siparişlerden veri özetleri hazırlayalım
+            recent_orders_summary = (
+                df_orders.tail(10).to_string()
+                if not df_orders.empty
+                else "Henüz günlük sipariş girilmemiş."
+            )
+            history_summary = (
+                df_history.head(15).to_string()
+                if df_history is not None
+                else "Geçmiş arşiv yok."
+            )
+            base_excel_summary = (
+                df_all.head(15).to_string()
+                if df_all is not None
+                else "Excel verisi yok."
             )
 
-            if surge_detected:
-              surge_warning = (
-                  " ⚡ **Kritik Maaş Dönemi & Talep Patlaması Uyarısı:**"
-                  " Geçmiş yıllarda ve güncel siparişlerde bu tarihlerde"
-                  " (ayın 10-11 sarmalında) 2.900+ adetlik ani sipariş"
-                  " patlamaları yaşandığı tespit edilmiştir. Sistem sadece"
-                  " yorum yapmakla kalmamış, matematiksel tabanı da bu dev"
-                  f" dalgaya göre **{subtotal} adete** revize etmiştir!"
-              )
+            prompt = f"""
+            Sen uzman bir gıda ve pastacılık üretim planlama yapay zeka asistanısın. Tatlıbak şubeleri için yaş pasta üretim tahminlemesi yapıyorsun.
+            
+            İNCELEME KRİTERLERİ:
+            - Hedef Tarih: {selected_date.strftime('%d.%m.%Y')} ({days_tr.get(day_of_week, '')})
+            - Özel Durum / Dönem: {special_day}
+            - Hava Durumu: {weather_condition}, {temperature}°C
+            - Güvenlik Payı: %{buffer_pct}
+            
+            VERİ KAYNAKLARI:
+            1. Son Girilen Gerçek Siparişler:
+            {recent_orders_summary}
+            
+            2. Geçmiş Yıllar Arşivi (Örn. geçen yıl aynı dönemdeki 1452 -> 2339 gibi zıplamalar, maaş dönemi patlamaları):
+            {history_summary}
+            
+            3. Eylül Sipariş / Ürün Yapısı:
+            {base_excel_summary}
+            
+            GÖREVLERİN:
+            1. Geçmiş arşivdeki talep dalgalarını (özellikle ayın 10-11'i gibi maaş dönemi zıplamalarını) ve son günlerdeki gerçek sipariş momentumunu (örn. son hafta sonu gelen ~2940 siparişi) dikkate alarak gerçekçi bir toplam üretim hedefi belirle. Sabit ortalamalara takılma, eğrileri ve patlamaları yorumla.
+            2. Ürün çeşitlerine göre (büyük, orta, sıfır boy, çeşitler) bu toplam hedefi akıllıca paylaştır.
+            3. Yöneticiye şu formatta net bir rapor sun:
+               - **Yönetici Özeti & Dalga Analizi:** Neden bu rakama ulaşıldığını (geçmiş zıplamalar ve son momentumla birlikte) profesyonel ve eleştirel bir dille açıkla.
+               - **Üretim Listesi Tablosu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
+            
+            Çıktıyı Streamlit'in işleyebileceği temiz bir formatta ver. Raporun ardından, ürün ve önerilen üretim adetlerini içeren bir JSON bloğunu ```json ... ``` arasında ver ki bunu tabloya dökebilelim.
+            """
 
-            past_weather = fetch_historical_weather(
-                f"2025-{t_month:02d}-{t_day:02d}"
+            response = ai_client.models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
             )
-            buf_str = f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
+            ai_text = response.text
 
-            hist_text = (
-                f"Geçen yıl benzer dönem ve çevresindeki günlerde (8-11 Ekim"
-                f" dönemi) yüksek hacimli talep dalgaları görülmüştür. O dönem"
-                f" hava **{past_weather}** idi. Dönemsel maaş dalgası analizi"
-                f" ve hava koşulları{buf_str} matematiksel olarak sisteme"
-                f" işlenerek hedef **{subtotal} adet** olarak"
-                f" optimize edilmiştir.{surge_warning}"
-            )
-        except Exception as ex:
-          hist_text = f"Analiz hatası: {ex}"
+            st.markdown(ai_text)
 
-      st.markdown("---")
-      st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici & Dalga Analizi Özeti**\n\n"
-          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
-          f" (Ayın {w_month}. haftası) / **{special_day}** / Hava:"
-          f" **{weather_condition}** ({temperature}°C).\n- **Gelişmiş Analiz &"
-          f" Revizyon:** {hist_text}"
-      )
+            # JSON verisini ayıklayıp tablo oluşturma denemesi
+            if "```json" in ai_text:
+              json_str = ai_text.split("```json")[1].split("```")[0].strip()
+              ai_data = json.loads(json_str)
+              if isinstance(ai_data, list):
+                ai_df = pd.DataFrame(ai_data)
+                st.dataframe(ai_df, use_container_width=True)
+
+          except Exception as ex:
+            st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Yarın İçin Tahmini Üretim Listesi"
-          " Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Akıllı Tahmin'"
+          "** butonuna tıklayın."
       )
 
 with tab2:
