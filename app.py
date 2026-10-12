@@ -21,9 +21,7 @@ except:
   pass
 
 if not api_key:
-  api_key = os.environ.get(
-      "GEMINI_API_KEY", "AQ.Ab8RN6LuBHy8LkB7IkvFlX2yeJPov0Tw-XZzorZZMhx7IdsLgQ"
-  )
+  api_key = os.environ.get("GEMINI_API_KEY", "")
 
 
 def call_gemini_api(prompt_text):
@@ -33,8 +31,8 @@ def call_gemini_api(prompt_text):
         " dosyanızı kontrol edin."
     )
 
-  # Google AI Studio Gemini API endpoint (v1beta)
-  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+  # Resmi ve tam uyumlu Gemini model endpoint'i
+  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
   headers = {"Content-Type": "application/json"}
   payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
 
@@ -45,7 +43,7 @@ def call_gemini_api(prompt_text):
         headers=headers,
         method="POST",
     )
-    with urlopen(req, timeout=25) as response:
+    with urlopen(req, timeout=30) as response:
       res_data = json.loads(response.read().decode("utf-8"))
       return (
           res_data.get("candidates", [{}])
@@ -55,8 +53,8 @@ def call_gemini_api(prompt_text):
       )
   except Exception as e:
     return (
-        f"Gemini API bağlantı hatası (401 veya Ağ): {e}. Lütfen API anahtarınızı"
-        " kontrol edin."
+        f"Gemini API bağlantı hatası: {e}. Lütfen API anahtarınızı ve Google AI"
+        " Studio yetkilerinizi kontrol edin."
     )
 
 
@@ -170,7 +168,7 @@ def fetch_3day_evening_weather():
 three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Gemini AI Üretim Tahmini & Analiz",
+    "🚀 Gemini AI Öğrenen Tahmin & Analiz",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
@@ -178,7 +176,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Gerçek Gemini AI Zekası ile Dinamik Üretim & Talep Patlaması Analizi"
+      "🤖 Öğrenen Gemini AI Beyni ile Dinamik Talep & Üretim Tahmini"
   )
 
   if three_day_forecast:
@@ -236,14 +234,14 @@ with tab1:
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
     ai_hesapla_button = st.button(
-        "🧠 Gemini AI ile Gerçek Zamanlı Analiz ve Üretim Planı Oluştur"
+        "🧠 Gemini AI ile Öğrenen ve Analiz Eden Üretim Planı Oluştur"
     )
 
   with col2:
     if ai_hesapla_button:
       with st.spinner(
-          "🧠 Gemini AI geçmiş arşivi, gün farklarını, maaş dönemi sarmalını ve"
-          " sipariş momentumunu derinlemesine analiz ediyor..."
+          "🧠 Gemini AI geçmiş arşivini, gün dinamiklerini ve sipariş"
+          " momentumunu harmanlayarak akıllı analiz üretiyor..."
       ):
         try:
           recent_orders_summary = (
@@ -263,11 +261,7 @@ with tab1:
           )
 
           prompt = f"""
-            Sen profesyonel bir gıda ve pastacılık üretim planlama yapay zeka uzmanısın. Tatlıbak şubeleri için yaş pasta üretim tahminlemesi yapıyorsun. Sabit ve ezbere rakamlar asla verme; seçilen günün özelliklerine, haftanın hangi gününe denk geldiğine ve dönemsel dalgalara göre her defasında tamamen dinamik ve mantıksal hesaplama yap.
-            
-            KRİTİK BAĞLAM VE GEÇMİŞ VERİLER:
-            - Geçmiş arşivlerde (ekim ayı başı / maaş dönemi sarmalında) Perşembe günleri 1452 adet olan siparişlerin Cuma/Cumartesi günleri 2339+ adetlere ani patlama (surge) yaşadığı bilinmektedir.
-            - Son hafta sonu şubelerden gelen gerçek siparişler 2940 adeti bulmuştur.
+            Sen Tatlıbak pastacılık üretim planlama sisteminin kıdemli yapay zeka uzmanısın. Amacımız asla ezbere ve sabit rakamlar üretmek değil; geçmişteki gerçek dalgalanmaları (örneğin ekim ayı başı / maaş dönemi sarmalında 1452 adetten 2339+ adete fırlayan ani sıçramaları) ve şubelerden gelen son 2940 adetlik sipariş momentumunu derinlemesine analiz eden, öğrenen ve her güne özel özgün üretim planı çıkaran bir yapı kurmaktır.
             
             HEDEF ANALİZ KRİTERLERİ:
             - Hedef Tarih ve Gün: {selected_date.strftime('%d.%m.%Y')} ({turkish_day})
@@ -279,17 +273,17 @@ with tab1:
             1. Son Girilen Gerçek Siparişler:
             {recent_orders_summary}
             
-            2. Geçmiş Yıllar Arşivi:
+            2. Geçmiş Yıllar Arşivi (1452 -> 2339 zıplamaları vb.):
             {history_summary}
             
             3. Ürün Çeşit Yapısı (Eylül Sipariş Listesi):
             {base_excel_summary}
             
             GÖREVLERİN:
-            1. Sabit ortalamalara veya kalıp sayılara asla takılma. Seçilen günün (örneğin Pazartesi sükuneti ile Cumartesi patlamasının farkını gözeterek) geçmişteki ani sıçrama eğrilerini (1452 -> 2339) ve son 2940 sipariş momentumunu akıllıca harmanlayarak **o güne özel** gerçekçi bir toplam üretim hedefi belirle.
-            2. Ürün çeşitlerine göre bu toplam hedefi mantıklı ve adil bir oranla paylaştır.
-            3. Yöneticiye şu formatta kusursuz bir rapor sun:
-               - **Yönetici Özeti & Dalga Analizi:** Seçilen günün özelliklerinin (Pazartesi, Cuma vb.) talebi nasıl etkilediğini, geçmiş sıçrama dinamikleriyle birlikte profesyonel ve eleştirel bir dille detaylıca açıkla.
+            1. Asla kalıp veya sabit rakamlar verme. Seçilen günün haftanın hangi günü olduğuna (Pazartesi, Cuma vb.), geçmişteki surge (ani talep patlaması) dinamiklerine ve maaş dönemi etkisine göre **o güne özel** non-linear (doğrusal olmayan) mantıksal bir toplam üretim hedefi kurgula.
+            2. Ürün çeşitlerine göre bu toplam hedefi oranla.
+            3. Yöneticiye şu formatta eleştirel, analitik ve profesyonel bir rapor sun:
+               - **Yönetici Özeti & Öğrenen Dalga Analizi:** Seçilen günün karakteristiğini ve geçmişteki 1452->2339 sarmalları ile son 2940 momentumunu nasıl harmanladığını detaylıca açıkla.
                - **Üretim Listesi Raporu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
             """
 
@@ -300,8 +294,8 @@ with tab1:
           st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
     else:
       st.info(
-          "👈 Sol panelden tarihi, günü ve kriterleri seçip **'Gemini AI ile"
-          " Gerçek Zamanlı Analiz ve Üretim Planı Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Öğrenen ve Analiz"
+          " Eden Üretim Planı Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
