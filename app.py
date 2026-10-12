@@ -372,7 +372,7 @@ with tab3:
           st.success("✅ Güncellendi!")
           st.rerun()
 
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (ESKİ + YENİ + TAM SAYI) ---
+  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (HATASIZ VE TAM SAYI) ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
 
@@ -447,20 +447,18 @@ with tab3:
     )
 
     if total_row_mask.any():
-      products_only_df = master_df[~total_row_mask].iloc[
-          1:
-      ]  # Tarih satırı hariç
+      products_only_df = master_df[~total_row_mask].iloc[1:]
       for col in master_df.columns:
         if col != product_col_name:
           numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
           if not numeric_col.isna().all():
             master_df.loc[total_row_mask, col] = int(numeric_col.sum())
 
-    # Tablodaki tüm sayısal değerlerin virgülsüz (int) görünmesini sağlayalım
+    # Sayısal değerleri güvenli bir şekilde tam sayıya çevirme (Hata engellendi)
     for col in master_df.columns:
       if col != product_col_name:
-        master_df[col] = pd.to_numeric(
-            master_df[col], errors="ignore"
-        ).fillna(master_df[col])
+        master_df[col] = pd.to_numeric(master_df[col], errors="coerce").fillna(
+            master_df[col]
+        )
 
     st.dataframe(master_df, use_container_width=True, height=500)
