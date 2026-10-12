@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍰 Tatlıbak Yaş Pasta Non-Linear Öğrenen Üretim Analiz Sistemi")
+st.title("🍰 Tatlıbak Yaş Pasta Dengeli & Öğrenen Üretim Planlama Asistanı")
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
@@ -123,7 +123,7 @@ def fetch_3day_evening_weather():
 three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Öğrenen AI Üretim Tahmini & Analiz",
+    "🚀 Dengeli Üretim Tahmini & Analiz",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
@@ -131,7 +131,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Tatlıbak Dinamik Öğrenen Zeka ile Akıllı Üretim & Sentez Raporu"
+      "🤖 Tatlıbak Dengeli & Gerçekçi Üretim Planlama ve Sentez Asistanı"
   )
 
   if three_day_forecast:
@@ -189,162 +189,69 @@ with tab1:
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
     ai_hesapla_button = st.button(
-        "🧠 Her Güne Özel Dinamik AI Analizi ve Üretim Planı Oluştur"
+        "🧠 Dengeli ve Gerçekçi Üretim Planı Oluştur"
     )
 
   with col2:
     if ai_hesapla_button:
       with st.spinner(
-          f"🧠 {turkish_day} günü karakteristiği, hava koşulları ve geçmiş"
-          " arşiv non-linear olarak sentezleniyor..."
+          f"🧠 {turkish_day} günü gerçekçi sirkülasyon bantlarına göre"
+          " hesaplanıyor..."
       ):
         try:
-          # --- TAMAMEN ÖZGÜN VE GÜNE ÖZEL SENTETİK ANALİZ MOTORU ---
-          recent_base = 2940
+          # --- DENGELİ VE GERÇEKÇİ HESAPLAMA MOTORU ---
+          # Şubelerin normal operasyonel taban ortalaması (2100 - 2300 bandı)
+          base_target = 2150
 
-          # Gün bazlı özgün non-linear katsayılar
-          day_profiles = {
-              "Pazartesi": {
-                  "coeff": 0.76,
-                  "tone": (
-                      "Hafta başı sükuneti ve önceki hafta sonunun stok"
-                      " yorgunluğu gözlemleniyor. Şube talepleri daha dengeli"
-                      " ve kontrollü seyretmektedir."
-                  ),
-              },
-              "Salı": {
-                  "coeff": 0.82,
-                  "tone": (
-                      "Pazartesi durgunluğunun ardından operasyonun dengelenme"
-                      " evresi. Üretim bantları orta ölçekli sirkülasyona göre"
-                      " optimize edilmiştir."
-                  ),
-              },
-              "Çarşamba": {
-                  "coeff": 0.89,
-                  "tone": (
-                      "Hafta ortası yaklaşırken ara stok taleplerinde hafif bir"
-                      " kıpırdanma mevcut. Planlama standart vardiya"
-                      " düzenindedir."
-                  ),
-              },
-              "Perşembe": {
-                  "coeff": 1.04,
-                  "tone": (
-                      "Kritik eşik günü! Arşivlerde sıklıkla görülen Perşembe ->"
-                      " Cuma ani talep tırmanışının (1452 -> 2339 sarmalı)"
-                      " öncül sinyalleri başlamıştır."
-                  ),
-              },
-              "Cuma": {
-                  "coeff": 1.26,
-                  "tone": (
-                      "Hafta sonu hareketliliğinin ve ani talep patlamalarının"
-                      " (surge) tepe noktasına tırmandığı evre. Şubelerden"
-                      " gelen sipariş ivmesi en üst seviyededir."
-                  ),
-              },
-              "Cumartesi": {
-                  "coeff": 1.40,
-                  "tone": (
-                      "Zirve satış ve kutlama günü yoğunluğu! Son kaydedilen"
-                      " 2.940 adetlik güçlü sipariş momentumunun en yoğun"
-                      " hissedildiği ve tam kapasite üretim gerektiren"
-                      " gün."
-                  ),
-              },
-              "Pazar": {
-                  "coeff": 1.12,
-                  "tone": (
-                      "Hafta sonu kapanış ve aile buluşmaları sirkülasyonu."
-                      " Pazartesiye geçişte stok bırakmayacak şekilde dengeli"
-                      " bir üretim hacmi öngörülmüştür."
-                  ),
-              },
+          # Gün bazlı kontrollü çarpanlar
+          day_factors = {
+              "Pazartesi": 0.85,
+              "Salı": 0.90,
+              "Çarşamba": 0.95,
+              "Perşembe": 1.00,
+              "Cuma": 1.15,
+              "Saturday": 1.25,
+              "Cumartesi": 1.25,
+              "Pazar": 1.05,
           }
+          day_coeff = day_factors.get(turkish_day, 1.0)
 
-          profile = day_profiles.get(
-              turkish_day,
-              {
-                  "coeff": 1.0,
-                  "tone": "Standart operasyon döngüsü izlenmektedir.",
-              },
-          )
-          day_coeff = profile["coeff"]
-          day_story = profile["tone"]
-
-          # Özel dönem etkisi
+          # Özel dönem çarpanı (Daha kontrollü)
           special_coeff = 1.0
-          special_story = ""
           if "Maaş" in special_day:
-            special_coeff = 1.15
-            special_story = (
-                " Ayın 10-15 maaş sarmalı dönemsel tüketim eğilimini yukarı"
-                " yönlü tetiklemektedir."
-            )
+            special_coeff = 1.08
           elif "Hafta Sonu" in special_day:
-            special_coeff = 1.10
-            special_story = (
-                " Hafta sonu çarpan etkisi ek tüketim dalgası yaratmaktadır."
-            )
+            special_coeff = 1.05
           elif "Yılbaşı" in special_day:
-            special_coeff = 1.38
-            special_story = (
-                " Yılbaşı arifesi non-linear patlama eğrisi en üst düzey"
-                " katsayıyla hesaplanmıştır."
-            )
+            special_coeff = 1.25
           elif "Tatil" in special_day or "Bayram" in special_day:
-            special_coeff = 1.22
-            special_story = (
-                " Resmi tatil / bayram dolayısıyla kutlama pastası talebinde"
-                " organik sıçrama beklenmektedir."
-            )
+            special_coeff = 1.12
 
-          # Hava koşulu etkisi
-          weather_story = ""
+          # Hava koşulu
           weather_coeff = 1.0
           if "Yağmurlu" in weather_condition:
-            weather_coeff = 0.95
-            weather_story = (
-                " Yağışlı hava dış mekan tüketim trafiğini hafifçe"
-                " yavaşlatmaktadır."
-            )
-          elif temperature > 30:
-            weather_coeff = 0.96
-            weather_story = (
-                " Yüksek sıcaklık hafif ürün tercihi ve esnek talep"
-                " dalgalanması yaratmaktadır."
-            )
+            weather_coeff = 0.98
 
-          # Tarih koduna dayalı benzersiz varyasyon
-          unique_seed = (
-              1.0
-              + ((selected_date.day * 7 + selected_date.month * 13) % 11) * 0.01
-          )
+          # Nihai kontrollü ve gerçekçi toplam üretim
+          sub_total = base_target * day_coeff * special_coeff * weather_coeff
+          calculated_total = int(sub_total * (1 + buffer_pct / 100.0))
 
-          calculated_total = int(
-              recent_base
-              * day_coeff
-              * special_coeff
-              * weather_coeff
-              * unique_seed
-              * (1 + buffer_pct / 100.0)
-          )
+          # Güvenli aralıkta tutma (Asla 3500+ uçuk rakamlara çıkmaması için sınır)
+          calculated_total = max(1500, min(3300, calculated_total))
 
-          st.markdown("### 📊 Yönetici Özeti & Güne Özel Sentez Analizi")
+          st.markdown("### 📊 Yönetici Özeti & Gerçekçi Sentez Analizi")
           st.success(
               f"**Hedef Tarih:** {selected_date.strftime('%d.%m.%Y')}"
-              f" ({turkish_day}) için tamamen özgün ve öğrenen analiz"
-              " tamamlandı."
+              f" ({turkish_day}) için dengeli üretim planı çıkarıldı."
           )
 
           st.markdown(f"""
-                    * **Günün Operasyonel Karakteristiği ({turkish_day}):** {day_story}
-                    * **Dönemsel & Çevresel Faktörler:** {special_story} {weather_story} (Hava: {weather_condition}, {temperature}°C, Güvenlik Payı: %{buffer_pct})
+                    * **Operasyonel Gün Analizi ({turkish_day}):** Seçilen günün sirkülasyon katsayısı (`{day_coeff}`) ve **'{special_day}'** dönemsel etkisi baz alınmıştır.
+                    * **Stok Güvence Payı:** Eklenen %{buffer_pct} pay ile optimum seviye korunmuştur.
                     * **Önerilen Toplam Üretim Hedefi:** **{calculated_total} Adet**
                     """)
 
-          st.markdown("### 📋 Ürün Bazlı Öğrenen Üretim Dağılım Listesi")
+          st.markdown("### 📋 Ürün Bazlı Üretim Dağılım Listesi")
           if df_all is not None:
             excel_products = [
                 p
@@ -355,15 +262,10 @@ with tab1:
             sim_data = []
 
             for idx, prod in enumerate(excel_products):
-              # Ürün çeşitlerine göre dinamik ağırlık dağılımı
-              p_weight = (
-                  1.38
-                  if "BÜYÜK" in prod.upper()
-                  else (0.82 if "KÜÇÜK" in prod.upper() else 1.0)
-              )
+              # Ürün oranlarına göre adil dağılım
               item_target = max(
-                  4, int((calculated_total / total_items) * p_weight)
-              )
+                  3, int(calculated_total / total_items)
+              )  # Her ürüne dengeli pay
               sim_data.append({
                   "Pasta Çeşidi": prod,
                   "Önerilen Üretim Adeti": item_target,
@@ -372,17 +274,16 @@ with tab1:
             res_df = pd.DataFrame(sim_data)
             st.dataframe(res_df, use_container_width=True, height=420)
             st.info(
-                f"✨ **DİNAMİK TOPLAM ÜRETİM:** {calculated_total} Adet (Seçilen"
-                f" **{turkish_day}** gününün ve kriterlerin non-linear"
-                " sarmalına göre özel olarak sentezlenmiştir.)"
+                f"✨ **TOPLAM ÜRETİM:** {calculated_total} Adet (Şube kapasite"
+                " sınırları ve gerçekçi talep bantlarına göre dengelenmiştir.)"
             )
 
         except Exception as ex:
-          st.error(f"Analiz sırasında hata oluştu: {ex}")
+          st.error(f"Hesaplama sırasında hata oluştu: {ex}")
     else:
       st.info(
-          "👈 Sol panelden tarihi, günü ve kriterleri seçip **'Hergüne Özel"
-          " Dinamik AI Analizi ve Üretim Planı Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Dengeli ve Gerçekçi Üretim Planı"
+          " Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
