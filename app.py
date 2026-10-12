@@ -183,11 +183,10 @@ with tab2:
   st.write(
       "Bu ekrandan akşam gelen gerçek sipariş adetlerini belirlediğiniz"
       " sıralamaya göre ilgili tarihe işleyebilir ve arşive"
-      " kaydedebilirsiniz."
+      " kaydedebilirsiniz. (TAB tuşuyla hızlıca ilerleyebilirsiniz)"
   )
 
   if df_all is not None:
-    # --- YENİ: Gönderdiğiniz görsele göre özel üretim/sipariş sıralaması ---
     desired_order = [
         "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
         "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
@@ -214,10 +213,8 @@ with tab2:
         "SIFIR TURTA ÇİLEKLİ OREO PASTA",
     ]
 
-    # Excel'den gelen mevcut ürünleri alalım
     excel_products = df_all.iloc[1:, 0].dropna().astype(str).tolist()
 
-    # İstediğiniz sıralamada olanları öne alalım, listede olup özel sırada olmayanları da arkasına ekleyelim
     products_list = [p for p in desired_order if p in excel_products]
     for p in excel_products:
       if p not in products_list:
@@ -226,17 +223,15 @@ with tab2:
     order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
 
     st.markdown("---")
-    st.write("### Ürün Bazlı Sipariş Adetleri (Özel Sıralı)")
+    st.write("### Ürün Bazlı Sipariş Adetleri (Tek Sütun / Hızlı Giriş)")
 
     with st.form("order_entry_form"):
       entered_orders = {}
-      cols = st.columns(2)
+      # TEK SÜTUN: TAB tuşuyla yukarıdan aşağıya hızlıca geçiş imkanı sağlar
       for idx, prod in enumerate(products_list):
-        col_idx = idx % 2
-        with cols[col_idx]:
-          entered_orders[prod] = st.number_input(
-              f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
-          )
+        entered_orders[prod] = st.number_input(
+            f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
+        )
 
       submit_order = st.form_submit_button(
           "💾 Gerçekleşen Siparişleri Kalıcı Olarak Kaydet"
