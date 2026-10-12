@@ -306,7 +306,7 @@ with tab1:
                   f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
                   f" {w_month}. haftasının {days_tr.get(day_of_week,'')}"
                   f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
-                  f" O ગયો hava **{past_weather}** idi. Güncel şube"
+                  f" O gün hava **{past_weather}** idi. Güncel şube"
                   f" talepleri, hava koşulları{buf_str} dikkate alınarak"
                   f" bugünkü üretim hedefiniz **{subtotal} adet** olarak"
                   " optimize edilmiştir."
@@ -431,10 +431,11 @@ with tab3:
     for col in master_df.columns:
       if col != p_col:
         c_str = str(col).split()[0]
+        parsed_dt = pd.to_datetime(c_str, errors="coerce")
         f_str = (
-            pd.to_datetime(c_str).strftime("%d.%m.%y")
-            if pd.to_datetime(c_str, errors="coerce") is not None
-            else c_str
+            parsed_dt.strftime("%d.%m.%y")
+            if pd.notna(parsed_dt)
+            else str(col)
         )
         if c_str in weather_dict:
           rename_cols[col] = weather_dict[c_str]
