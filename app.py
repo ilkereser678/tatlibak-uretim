@@ -20,8 +20,7 @@ historical_excel_file = "gecmis_arsiv.xlsx"
 @st.cache_data
 def load_data():
   xls = pd.ExcelFile(excel_file)
-  df = xls.parse("Sipariş List")
-  return df
+  return xls.parse("Sipariş List")
 
 
 try:
@@ -64,7 +63,6 @@ else:
   df_weather["Tarih"] = pd.to_datetime(df_weather["Tarih"])
 
 
-# İstanbul için 3 günlük saatlik (17:00-21:00 akşam yoğunluğu) hava durumu tahmini çeken fonksiyon
 @st.cache_data(ttl=3600)
 def fetch_3day_evening_weather():
   forecast_days = []
@@ -76,9 +74,7 @@ def fetch_3day_evening_weather():
     for idx, day_data in enumerate(data.get("weather", [])[:3]):
       date_str = day_data.get("date")
       hourly_list = day_data.get("hourly", [])
-
-      evening_temps = []
-      evening_descs = []
+      evening_temps, evening_descs = [], []
 
       for h in hourly_list:
         try:
@@ -89,12 +85,16 @@ def fetch_3day_evening_weather():
         except:
           pass
 
-      if evening_temps:
-        avg_t = int(sum(evening_temps) / len(evening_temps))
-        common_d = max(set(evening_descs), key=evening_descs.count)
-      else:
-        avg_t = int(day_data.get("avgtempC", 20))
-        common_d = "Açık"
+      avg_t = (
+          int(sum(evening_temps) / len(evening_temps))
+          if evening_temps
+          else int(day_data.get("avgtempC", 20))
+      )
+      common_d = (
+          max(set(evening_descs), key=evening_descs.count)
+          if evening_descs
+          else "Açık"
+      )
 
       tr_desc = {
           "Sunny": "Açık",
@@ -103,25 +103,18 @@ def fetch_3day_evening_weather():
           "Cloudy": "Bulutlu",
           "Overcast": "Çok Bulutlu",
           "Light rain": "Hafif Yağmurlu",
-          "Patchy rain possible": "Hafif Yağmurlu",
           "Moderate rain": "Yağmurlu",
-          "Heavy rain": "Çok Yağmurlu",
       }.get(common_d, common_d)
 
-      day_name_map = {
-          0: "Bugün",
-          1: "Yarın",
-          2: "2 Gün Sonra (Satış Günü)",
-      }
+      day_name_map = {0: "Bugün", 1: "Yarın", 2: "2 Gün Sonra (Satış Günü)"}
       forecast_days.append({
           "Gün": day_name_map.get(idx, f"+{idx} Gün"),
           "Tarih": date_str,
           "Akşam Sıcaklık (17:00-21:00)": f"{avg_t}°C",
           "Hava Durumu": tr_desc,
       })
-  except Exception:
+  except:
     pass
-
   return forecast_days
 
 
@@ -136,13 +129,12 @@ def fetch_historical_weather(target_date_str):
     desc_list = weather_info.get("hourly", [{}])[0].get("weatherDesc", [{}])
     desc = desc_list[0].get("value", "Parçalı Bulutlu") if desc_list else "Normal"
     return f"{avg_temp}°C, {desc}"
-  except Exception:
+  except:
     return "Mevsim Normalleri (18°C - Parçalı Bulutlu)"
 
 
 three_day_forecast = fetch_3day_evening_weather()
 
-# SEKME YAPISI
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
     "📝 Günlük Sipariş Girişi",
@@ -153,9 +145,8 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
   st.subheader("Günlük Veri Girişi ve Yarınki Üretim Planı")
 
-  # --- 3 GÜNLÜK HAVA DURUMU BİLGİ PANELİ ---
   if three_day_forecast:
-    st.markdown("🌤️ **İstanbul 3 Günlük Akşam Yoğunluk (17:00 - 21:00) Hava Rehberi**")
+    st.markdown("🌤️ **İstanbul 3 Günlük Akşam Yoğunluk Hava Rehberi**")
     f_cols = st.columns(len(three_day_forecast))
     for i, day_info in enumerate(three_day_forecast):
       with f_cols[i]:
@@ -183,8 +174,6 @@ with tab1:
     st.info(f"Seçilen Gün: **{days_tr.get(day_of_week, '')}**")
 
     st.markdown("---")
-    st.markdown("🌤️ **Üretim / Satış Günü Hava Koşulları Seçimi**")
-
     weather_condition = st.selectbox(
         "Hava Durumu Etkisi",
         [
@@ -194,15 +183,7 @@ with tab1:
             "Aşırı Sıcak / Güneşli (Ağır Tatlı Azalır)",
         ],
     )
-
-    temperature = st.slider(
-        "Beklenen Sıcaklık (°C) [Yukarıdaki tablodan bakabilirsiniz]",
-        min_value=-5,
-        max_value=40,
-        value=20,
-        step=1,
-    )
-
+    temperature = st.slider("Beklenen Sıcaklık (°C)", -5, 40, 20, 1)
     special_day = st.selectbox(
         "Özel Gün Durumu",
         [
@@ -210,8 +191,8 @@ with tab1:
             "Yılbaşı ve Arifesi",
             "Sevgililer Günü (14 Şubat)",
             "Anneler Günü",
-            "Resmi Tatil / Bayram (29 Ekim, 23 Nisan vb.)",
-            "Hafta Sonu / Cuma Akşamı Yoğunluğu",
+            "Resmi Tatil / Bayram",
+            "Hafta Sonu / Cuma Akşamı",
         ],
     )
     buffer_pct = st.selectbox(
@@ -221,29 +202,28 @@ with tab1:
 
   with col2:
     if hesapla_button:
-      environmental_multiplier = 1.0
+      env_mult = 1.0
       if "Bulutlu" in weather_condition:
-        environmental_multiplier += 0.05
+        env_mult += 0.05
       elif "Çok Yağmurlu" in weather_condition:
-        environmental_multiplier -= 0.08
+        env_mult -= 0.08
       elif "Aşırı Sıcak" in weather_condition or temperature > 30:
-        environmental_multiplier -= 0.05
+        env_mult -= 0.05
 
-      special_multiplier = 1.0
+      spec_mult = 1.0
       if "Yılbaşı" in special_day:
-        special_multiplier = 1.40
+        spec_mult = 1.40
       elif "Sevgililer" in special_day or "Anneler" in special_day:
-        special_multiplier = 1.25
+        spec_mult = 1.25
       elif "Resmi Tatil" in special_day:
-        special_multiplier = 1.15
+        spec_mult = 1.15
       elif "Hafta Sonu" in special_day:
-        special_multiplier = 1.10
+        spec_mult = 1.10
 
       raw_products = df_all.iloc[1:, 0].dropna().astype(str).values
       valid_products = [
           p for p in raw_products if "TOPLAM" not in p.strip().upper()
       ]
-
       numeric_df = df_all.iloc[1:, 1:].apply(pd.to_numeric, errors="coerce")
       valid_numeric_df = numeric_df.iloc[: len(valid_products)]
 
@@ -252,19 +232,14 @@ with tab1:
           if not valid_numeric_df.empty
           else pd.Series([0] * len(valid_products))
       )
+      comb_mult = env_mult * spec_mult * (1 + (buffer_pct / 100.0))
+      forecast_vals = (base_vals * comb_mult).round().astype(int)
 
-      combined_multiplier = (
-          environmental_multiplier
-          * special_multiplier
-          * (1 + (buffer_pct / 100.0))
-      )
-      forecast_vals = (base_vals * combined_multiplier).round().astype(int)
       target_col_name = (
           "Tahmini Üretim (Net / Stoksuz)"
           if buffer_pct == 0
-          else f"Tahmini Üretim (%{buffer_pct} Stoklu + Akıllı Etki)"
+          else f"Tahmini Üretim (%{buffer_pct} Stoklu)"
       )
-
       forecast_df = pd.DataFrame({
           "Pasta Çeşidi": valid_products,
           target_col_name: forecast_vals,
@@ -274,163 +249,100 @@ with tab1:
           .astype(str)
           .str.contains("BATON", na=False)
       ]
-
       subtotal = int(forecast_df[target_col_name].sum())
 
-      total_row_df = pd.DataFrame({
-          "Pasta Çeşidi": ["TOPLAM PASTA SAYISI"],
-          target_col_name: [subtotal],
-      })
+      total_row_df = pd.DataFrame(
+          {"Pasta Çeşidi": ["TOPLAM PASTA SAYISI"], target_col_name: [subtotal]}
+      )
       forecast_df = pd.concat([forecast_df, total_row_df], ignore_index=True)
 
-      st.metric(
-          label="Önerilen Toplam Pasta Üretimi",
-          value=f"{subtotal} Adet",
-      )
+      st.metric(label="Önerilen Toplam Pasta Üretimi", value=f"{subtotal} Adet")
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- PROFESYONEL VE NET YÖNETİCİ ÖZETİ ---
-      historical_insight_text = (
-          "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) okunamadı."
-      )
+      # Yönetici Özeti
+      hist_text = "Geçmiş yıl arşivi okunamadı."
+      w_month = 1
       if df_history is not None:
         try:
-          target_month = selected_date.month
-          target_day = selected_date.day
-          target_weekday = selected_date.weekday()
-          week_of_month = (target_day - 1) // 7 + 1
-
-          date_col = df_history.columns[0]
+          t_month, t_day, t_weekday = (
+              selected_date.month,
+              selected_date.day,
+              selected_date.weekday(),
+          )
+          w_month = (t_day - 1) // 7 + 1
+          d_col = df_history.columns[0]
           df_history["Parsed_Date"] = pd.to_datetime(
-              df_history[date_col], errors="coerce"
+              df_history[d_col], errors="coerce"
           )
           df_history["Weekday"] = df_history["Parsed_Date"].dt.weekday
           df_history["Week_Of_Month"] = (
               df_history["Parsed_Date"].dt.day - 1
           ) // 7 + 1
-
           num_cols = df_history.select_dtypes(
               include=["number", "float", "int"]
           ).columns
 
           if not num_cols.empty:
-            matched_hist = df_history[
-                (df_history["Parsed_Date"].dt.month == target_month)
-                & (df_history["Week_Of_Month"] == week_of_month)
-                & (df_history["Weekday"] == target_weekday)
+            matched = df_history[
+                (df_history["Parsed_Date"].dt.month == t_month)
+                & (df_history["Week_Of_Month"] == w_month)
+                & (df_history["Weekday"] == t_weekday)
             ]
-
-            hist_val = 0
-            hist_date_str = ""
-            if not matched_hist.empty:
-              hist_val = int(matched_hist[num_cols].sum().sum())
-              hist_date_str = (
-                  matched_hist["Parsed_Date"]
-                  .dt.strftime("%d.%m.%Y")
-                  .values[0]
-              )
-            else:
-              matched_alt = df_history[
-                  (df_history["Parsed_Date"].dt.month == target_month)
-                  & (df_history["Weekday"] == target_weekday)
-              ]
-              if not matched_alt.empty:
-                hist_val = int(
-                    matched_alt[num_cols].sum().sum() / len(matched_alt)
-                )
-                hist_date_str = "Geçen yıl aynı ayın benzer günleri"
-
-            past_weather_query_date = f"2025-{target_month:02d}-{target_day:02d}"
-            past_weather_info = fetch_historical_weather(
-                past_weather_query_date
+            hist_val = (
+                int(matched[num_cols].sum().sum()) if not matched.empty else 0
             )
-
-            buffer_text = (
-                f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
+            hist_date_str = (
+                matched["Parsed_Date"].dt.strftime("%d.%m.%Y").values[0]
+                if not matched.empty
+                else "Benzer dönem"
             )
+            past_weather = fetch_historical_weather(
+                f"2025-{t_month:02d}-{t_day:02d}"
+            )
+            buf_str = f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
 
             if hist_val > 0:
-              historical_insight_text = (
+              hist_text = (
                   f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
-                  f" {week_of_month}. haftasının {days_tr.get(day_of_week,'')}"
+                  f" {w_month}. haftasının {days_tr.get(day_of_week,'')}"
                   f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
-                  f" O gün hava **{past_weather_info}** idi. Güncel şube"
-                  f" talepleri, hava koşulları{buffer_text} dikkate alınarak"
+                  f" O ગયો hava **{past_weather}** idi. Güncel şube"
+                  f" talepleri, hava koşulları{buf_str} dikkate alınarak"
                   f" bugünkü üretim hedefiniz **{subtotal} adet** olarak"
                   " optimize edilmiştir."
               )
             else:
-              historical_insight_text = (
-                  "Geçen yıl arşivinde benzer gün konumu için doğrudan"
-                  f" eşleşme bulunamadı, ancak mevcut sipariş ve hava trendi"
-                  f" baz alınarak hedef **{subtotal} adet** olarak belirlendi."
+              hist_text = (
+                  "Geçmiş yıl arşivinde doğrudan eşleşme bulunamadı, mevcut"
+                  f" sipariş eğilimi ile hedef **{subtotal} adet** belirlendi."
               )
-          else:
-            historical_insight_text = (
-                "Geçmiş yıl verisinde uygun sayısal sütun bulunamadı."
-            )
         except Exception as ex:
-          historical_insight_text = (
-              f"Geçmiş yıl verisi analiz edilirken hata oluştu: {ex}"
-          )
+          hist_text = f"Analiz hatası: {ex}"
 
       st.markdown("---")
       st.info(
           "🤖 **Tatlıbak Akıllı Yönetici Özeti**\n\n"
           f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
-          f" (Ayın {week_of_month}. haftası) için **{special_day}** ve hava"
-          f" koşulu **'{weather_condition}'** ({temperature}°C) baz"
-          f" alınmıştır.\n- **Analiz & Karşılaştırma:**"
-          f" {historical_insight_text}"
+          f" (Ayın {w_month}. haftası) / **{special_day}** / Hava:"
+          f" **{weather_condition}** ({temperature}°C).\n- **Analiz &"
+          f" Karşılaştırma:** {hist_text}"
       )
-
     else:
       st.info(
-          "👈 Sol panelden 3 günlük hava tablosuna bakarak kriterleri seçip"
-          " **'Yarın İçin Tahmini Üretim Listesi Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Yarın İçin Tahmini Üretim Listesi"
+          " Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   if df_all is not None:
-    desired_order = [
-        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
-        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
-        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
-        "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
-        "BÜYÜK TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
-        "BÜYÜK TURTA MUZLU (MUZLU TURTA)",
-        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
-        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
-        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
-        "ORTA TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
-        "ORTA TURTA MEYVELİ",
-        "ORTA TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
-        "ORTA TURTA MUZLU (MUZLU TURTA)",
-        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
-        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
-        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
-        "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
-        "SIFIR BOY PASTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
-        "SIFIR BOY PASTA MUZLU (MUZLU TURTA)",
-        "SIFIR BOY PASTA MEYVELİ",
-        "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
-        "ORTA TURTA ÇİLEKLİ OREO PASTA",
-        "SIFIR TURTA ÇİLEKLİ OREO PASTA",
-    ]
     excel_products = [
         p
         for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
         if "TOPLAM" not in p.strip().upper()
     ]
-    products_list = [p for p in desired_order if p in excel_products]
-    for p in excel_products:
-      if p not in products_list:
-        products_list.append(p)
-
-    order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
+    order_date = st.date_input("Sipariş Tarihi Seçin", key="odate")
     st.markdown("---")
-    st.markdown("🌤️ **O Günün Hava & Çevre Koşulları**")
     entry_weather = st.selectbox(
         "Hava Durumu",
         [
@@ -441,66 +353,38 @@ with tab2:
             "Çok Yağmurlu",
             "Çok Bulutlu",
         ],
-        key="entry_weather",
+        key="eweather",
     )
-    entry_temp = st.number_input(
-        "Sıcaklık (°C)", min_value=-10, max_value=45, value=20, step=1, key="entry_temp"
-    )
+    entry_temp = st.number_input("Sıcaklık (°C)", -10, 45, 20, 1, key="etemp")
 
-    st.markdown("---")
     with st.form("order_entry_form"):
-      entered_orders = {}
-      for idx, prod in enumerate(products_list):
-        entered_orders[prod] = st.number_input(
-            f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
-        )
-
+      entered_orders = {
+          prod: st.number_input(
+              f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"o_{i}"
+          )
+          for i, prod in enumerate(excel_products)
+      }
       current_total = sum(entered_orders.values())
       st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
-      submit_order = st.form_submit_button(
-          "💾 Gerçekleşen Siparişleri ve Hava Durumunu Kaydet"
-      )
-
-      if submit_order:
-        new_rows = []
+      if st.form_submit_button("💾 Gerçekleşen Siparişleri ve Havayı Kaydet"):
         str_date = order_date.strftime("%Y-%m-%d")
         if not df_orders.empty:
           df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
-
-        for prod, qty in entered_orders.items():
-          if qty > 0:
-            new_rows.append({
+        new_rows = [
+            {
                 "Tarih": str_date,
-                "Pasta Çeşidi": prod,
-                "Gerçekleşen Sipariş": qty,
-            })
-
+                "Pasta Çeşidi": p,
+                "Gerçekleşen Sipariş": q,
+            }
+            for p, q in entered_orders.items()
+            if q > 0
+        ]
         if new_rows:
-          new_df = pd.DataFrame(new_rows)
-          new_df["Tarih"] = pd.to_datetime(new_df["Tarih"])
-          df_orders = pd.concat([df_orders, new_df], ignore_index=True)
-          df_orders_save = df_orders.copy()
-          df_orders_save["Tarih"] = df_orders_save["Tarih"].dt.strftime(
-              "%Y-%m-%d"
+          df_orders = pd.concat(
+              [df_orders, pd.DataFrame(new_rows)], ignore_index=True
           )
-          df_orders_save.to_csv(csv_archive_file, index=False)
-
-          if not df_weather.empty:
-            df_weather = df_weather[
-                df_weather["Tarih"] != pd.to_datetime(str_date)
-            ]
-          new_weather_row = pd.DataFrame([{
-              "Tarih": pd.to_datetime(str_date),
-              "Hava Durumu": entry_weather,
-              "Sıcaklık (°C)": f"{entry_temp}°C",
-          }])
-          df_weather = pd.concat([df_weather, new_weather_row], ignore_index=True)
-          df_weather_save = df_weather.copy()
-          df_weather_save["Tarih"] = df_weather_save["Tarih"].dt.strftime(
-              "%Y-%m-%d"
-          )
-          df_weather_save.to_csv(csv_weather_file, index=False)
-          st.success("✅ Kayıt başarıyla tamamlandı!")
+          df_orders.to_csv(csv_archive_file, index=False)
+          st.success("✅ Kayıt başarılı!")
           st.rerun()
         else:
           st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
@@ -508,105 +392,65 @@ with tab2:
 with tab3:
   st.subheader("📂 Arşiv & Matris Tablo")
   if not df_orders.empty:
-    st.markdown("---")
-    st.subheader("✏️ Geçmiş Gün Verisini Düzenle")
-    edit_date_list = sorted(
-        df_orders["Tarih"].dt.strftime("%d.%m.%Y").unique().tolist(), reverse=True
+    master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
+    p_col = master_df.columns[0]
+    master_df = master_df[
+        ~master_df[p_col].astype(str).str.upper().str.contains("TOPLAM")
+    ]
+    weather_dict = {}
+    if not df_weather.empty:
+      for _, w_row in df_weather.iterrows():
+        d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
+        weather_dict[d_str] = (
+            f"{str(w_row.get('Sıcaklık (°C)','20')).replace('°C','')}°C -"
+            f" {w_row.get('Hava Durumu','Açık')}"
+        )
+
+    df_orders["Clean_Product"] = (
+        df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
     )
-    if edit_date_list:
-      selected_edit_date_str = st.selectbox(
-          "Düzenlenecek Tarihi Seçin", edit_date_list, key="edit_date_sel"
-      )
-      dt_edit_obj = pd.to_datetime(selected_edit_date_str, format="%d.%m.%Y")
+    pivot_orders = df_orders.pivot_table(
+        index="Clean_Product",
+        columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
+        values="Gerçekleşen Sipariş",
+        aggfunc="sum",
+    ).fillna(0)
+    master_df["Clean_Product"] = (
+        master_df[p_col].astype(str).str.strip().str.upper()
+    )
 
-      current_w_val, current_t_val = "Açık", 20
-      if not df_weather.empty:
-        w_match = df_weather[df_weather["Tarih"] == dt_edit_obj]
-        if not w_match.empty:
-          current_w_val = w_match.iloc[0].get("Hava Durumu", "Açık")
-          try:
-            current_t_val = int(
-                str(w_match.iloc[0].get("Sıcaklık (°C)", "20"))
-                .replace("°C", "")
-                .strip()
-            )
-          except:
-            current_t_val = 20
+    for d_col in pivot_orders.columns:
+      if d_col not in master_df.columns:
+        master_df[d_col] = 0
+      master_df[d_col] = master_df["Clean_Product"].map(
+          pivot_orders[d_col].to_dict()
+      ).fillna(0)
+    master_df = master_df.drop(columns=["Clean_Product"])
 
-      weather_options = [
-          "Açık",
-          "Bulutlu",
-          "Hafif Çisenti",
-          "Hafif Yağmurlu",
-          "Çok Yağmurlu",
-          "Çok Bulutlu",
-      ]
-      default_w_idx = (
-          weather_options.index(current_w_val)
-          if current_w_val in weather_options
-          else 0
-      )
-
-      col_e1, col_e2 = st.columns(2)
-      with col_e1:
-        edit_weather = st.selectbox(
-            "Hava Durumu Güncelle",
-            weather_options,
-            index=default_w_idx,
-            key="edit_w_sel",
+    rename_cols, date_row = {}, {p_col: "TARİH"}
+    for col in master_df.columns:
+      if col != p_col:
+        c_str = str(col).split()[0]
+        f_str = (
+            pd.to_datetime(c_str).strftime("%d.%m.%y")
+            if pd.to_datetime(c_str, errors="coerce") is not None
+            else c_str
         )
-      with col_e2:
-        edit_temp = st.number_input(
-            "Sıcaklık (°C) Güncelle",
-            min_value=-10,
-            max_value=45,
-            value=current_t_val,
-            step=1,
-            key="edit_t_sel",
-        )
+        if c_str in weather_dict:
+          rename_cols[col] = weather_dict[c_str]
+          date_row[weather_dict[c_str]] = f_str
+        else:
+          rename_cols[col] = str(col)
+          date_row[str(col)] = f_str
 
-      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
-      with st.form("edit_record_form"):
-        updated_qtys = {}
-        for _, row in day_records.iterrows():
-          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
-              f"{row['Pasta Çeşidi']}",
-              min_value=0,
-              max_value=500,
-              value=int(row["Gerçekleşen Sipariş"]),
-              step=1,
-          )
-        if st.form_submit_button("🔄 Güncelle"):
-          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
-          new_edit_rows = [
-              {
-                  "Tarih": dt_edit_obj,
-                  "Pasta Çeşidi": p,
-                  "Gerçekleşen Sipariş": q,
-              }
-              for p, q in updated_qtys.items()
-              if q > 0
-          ]
-          if new_edit_rows:
-            df_orders = pd.concat(
-                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
-            )
-            df_orders.to_csv(csv_archive_file, index=False)
+    master_df = master_df.rename(columns=rename_cols)
+    master_df = pd.concat([pd.DataFrame([date_row]), master_df], ignore_index=True)
+    st.dataframe(master_df, use_container_width=True, height=500)
 
-          if os.path.exists(csv_weather_file):
-            df_w_up = pd.read_csv(csv_weather_file)
-            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
-            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
-          else:
-            df_w_up = pd.DataFrame(
-                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
-            )
-          new_w_row = pd.DataFrame([{
-              "Tarih": dt_edit_obj,
-              "Hava Durumu": edit_weather,
-              "Sıcaklık (°C)": f"{edit_temp}°C",
-          }])
-          updated_weather_df = pd.concat(
-              [df_w_up, new_w_row], ignore_index=True
-          )
-          updated_weather_df.to_csv(csv_weather_file, index=
+with tab4:
+  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
+  if df_history is not None:
+    st.success("✅ Arşiv başarıyla okundu!")
+    st.dataframe(df_history, use_container_width=True, height=550)
+  else:
+    st.warning("⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı.")
