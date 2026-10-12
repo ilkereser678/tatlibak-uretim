@@ -372,7 +372,7 @@ with tab3:
           st.success("✅ Güncellendi!")
           st.rerun()
 
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (HATASIZ VE TAM SAYI) ---
+  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO (KÜSURATSIZ VE TAM SAYI FORMATI) ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
 
@@ -437,7 +437,7 @@ with tab3:
         [pd.DataFrame([date_row_data]), master_df], ignore_index=True
     )
 
-    # Toplam satırı ve sayıları tam sayıya (virgülsüz) çevirme
+    # Toplam satırını otomatik güncelleme
     total_row_mask = (
         master_df[product_col_name]
         .astype(str)
@@ -454,11 +454,25 @@ with tab3:
           if not numeric_col.isna().all():
             master_df.loc[total_row_mask, col] = int(numeric_col.sum())
 
-    # Sayısal değerleri güvenli bir şekilde tam sayıya çevirme (Hata engellendi)
+    # --- KÜSURATLARI VE .0 İFADELERİNİ TAMAMEN KALDIRMA ---
     for col in master_df.columns:
       if col != product_col_name:
-        master_df[col] = pd.to_numeric(master_df[col], errors="coerce").fillna(
-            master_df[col]
+        # Önce sayısal formata çevir, NaN olanları (tarih satırı vb.) orijinalinde bırak
+        numeric_series = pd.to_numeric(master_df[col], errors="coerce")
+        # Null olmayan sayıları integer'a çevirip string yapıyoruz (böylece .0 görünmez)
+        master_df[col] = numeric_series.apply(
+            lambda x: str(int(x)) if pd.notnull(x) else master_df.loc[x.index if hasattr(x, 'index') else master_df.index, col] if False else master_df[col]
         )
+        
+        # Daha temiz bir döngü ile hücre bazlı dönüştürme:
+        for idx in master_df.index:
+          val = master_df.loc[idx, col]
+          try:
+            # Eğer sayıya dönüşebiliyorsa tam sayı yapalım (TARİH satırı hariç)
+            if idx != 0 and pd.notnull(val) and str(val).strip() != "":
+              num_val = float(val)
+              master_df.loc[idx, col] = int(num_val)
+          except:
+            pass
 
     st.dataframe(master_df, use_container_width=True, height=500)
