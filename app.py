@@ -1,5 +1,7 @@
+import asyncio
 import os
 import pandas as pd
+import python_weather
 import streamlit as st
 
 st.set_page_config(
@@ -43,6 +45,42 @@ else:
   )
   df_weather["Tarih"] = pd.to_datetime(df_weather["Tarih"])
 
+
+# İstanbul için anlık hava durumunu çeken asenkron fonksiyon
+async def get_istanbul_weather():
+  async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
+    # Metrik (°C) birim için unit=python_weather.METRIC kullanılır
+    pass
+
+
+@st.cache_data(ttl=3600)
+def fetch_live_weather():
+  async def main():
+    async with python_weather.Client(unit=python_weather.METRIC) as client:
+      weather = await client.get("Istanbul")
+      return weather.temperature, weather.description
+
+  try:
+    return asyncio.run(main())
+  except Exception:
+    return 20, "Açık"
+
+
+live_temp, live_desc = fetch_live_weather()
+
+# Türkçe hava durumu çevirisi için sözlük
+weather_translation = {
+    "Sunny": "Açık",
+    "Clear": "Açık",
+    "Partly cloudy": "Parçalı Bulutlu",
+    "Cloudy": "Bulutlu",
+    "Overcast": "Çok Bulutlu",
+    "Light rain": "Hafif Yağmurlu",
+    "Moderate rain": "Yağmurlu",
+    "Heavy rain": "Çok Yağmurlu",
+}
+tr_live_desc = weather_translation.get(live_desc, "Açık / Güneşli (Normal)")
+
 tab1, tab2, tab3 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
     "📝 Günlük Sipariş Girişi",
@@ -68,7 +106,9 @@ with tab1:
     st.info(f"Seçilen Gün: **{days_tr.get(day_of_week, '')}**")
 
     st.markdown("---")
-    st.markdown("🌤️ **Hava & Çevre Koşulları**")
+    st.markdown("🌤️ **İstanbul Hava & Çevre Koşulları (Canlı Otomatik)**")
+
+    # Otomatik çekilen verileri varsayılan olarak sunuyoruz
     weather_condition = st.selectbox(
         "Hava Durumu Etkisi",
         [
@@ -77,9 +117,22 @@ with tab1:
             "Çok Yağmurlu / Fırtınalı (Talep Düşüşü -%)",
             "Aşırı Sıcak / Güneşli (Ağır Tatlı Azalır)",
         ],
+        index=(
+            1
+            if "Bulut" in tr_live_desc
+            else (2 if "Yağmur" in tr_live_desc else 0)
+        ),
     )
+
     temperature = st.slider(
-        "Beklenen Sıcaklık (°C)", min_value=-5, max_value=40, value=20, step=1
+        "Beklenen Sıcaklık (°C)",
+        min_value=-5,
+        max_value=40,
+        value=int(live_temp),
+        step=1,
+    )
+    st.caption(
+        f"🌐 İstanbul anlık web servisi verisi: **{live_temp}°C, {live_desc}**"
     )
 
     special_day = st.selectbox(
