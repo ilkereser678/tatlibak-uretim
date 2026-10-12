@@ -232,7 +232,6 @@ with tab2:
             f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
         )
 
-      # Anlık toplam hesaplama (Form içinde gösterim için)
       current_total = sum(entered_orders.values())
       st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
 
@@ -334,36 +333,55 @@ with tab3:
         )
         st.rerun()
 
-  # --- YENİ: Orijinal Excel ile Yeni Girilen CSV Verilerini Birleştiren Ana Matris Tablo ---
+  # --- GÜNCELLENMİŞ: Excel + Yeni Girilenleri Birleştiren ve Altında Toplam Veren Matris Tablo ---
   st.markdown("---")
-  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Girilenler)")
+  st.subheader(
+      "📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Girilenler ve Toplam)"
+  )
 
   if df_all is not None:
-    # Orijinal Excel yapısını baz alalım
     master_df = df_all.copy()
 
-    # Eğer günlük siparişlerde kayıt varsa, bunları Excel formatındaki matrise sütun olarak ekleyelim
     if not df_orders.empty:
-      # df_orders içindeki verileri pivot yaparak ürün x tarih matrisine çevirelim
+      # Ürün isimlerini standartlaştırarak (büyük/küçük harf ve boşlukları temizleyerek) eşleştirmeyi garantileyelim
+      df_orders["Clean_Product"] = (
+          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
+      )
+
       pivot_orders = df_orders.pivot_table(
-          index="Pasta Çeşidi",
+          index="Clean_Product",
           columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
           values="Gerçekleşen Sipariş",
           aggfunc="sum",
       ).fillna(0)
 
-      # Ana tabloya (master_df) bu yeni tarih sütunlarını entegre edelim
-      # Excel'in ilk sütunu ürün adıdır (örneğin 0. index)
       product_col_name = master_df.columns[0]
+      master_df["Clean_Product"] = (
+          master_df[product_col_name].astype(str).str.strip().str.upper()
+      )
 
-      # Pivot tablodaki yeni tarihleri ana tabloya ekleyelim
       for date_col in pivot_orders.columns:
-        # Eğer bu tarih zaten Excel'de yoksa sütun olarak ekleyelim
         if date_col not in master_df.columns:
-          # Ürün eşleştirmesi yaparak değerleri yerleştirelim
-          mapped_vals = master_df[product_col_name].map(
-              pivot_orders[date_col]
-          ).fillna(0)
-          master_df[date_col] = mapped_vals
+          mapping_dict = pivot_orders[date_col].to_dict()
+          master_df[date_col] = (
+              master_df["Clean_Product"].map(mapping_dict).fillna(0)
+          )
 
-    st.dataframe(master_df, use_container_width=True, height=450)
+      master_df = master_df.drop(columns=["Clean_Product"])
+
+    # --- YENİ: Sayısal sütunların altına GENEL TOPLAM satırı ekleme ---
+    summary_row = {}
+    for col in master_df.columns:
+      # Sütundaki değerleri sayısal formata çevirip toplamını alalım
+      numeric_col = pd.to_numeric(master_df[col], errors="coerce")
+      if not numeric_col.isna().all():
+        summary_row[col] = numeric_col.sum()
+      else:
+        # İlk sütun veya metin sütunu ise başlık yazalım
+        summary_row[col] = "GENEL TOPLAM" if col == master_df.columns[0] else ""
+
+    # Toplam satırını tabloya ekleyelim
+    summary_df = pd.DataFrame([summary_row])
+    final_display_df = pd.concat([master_df, summary_df], ignore_index=True)
+
+    st.dataframe(final_display_df, use_container_width=True, height=480)
