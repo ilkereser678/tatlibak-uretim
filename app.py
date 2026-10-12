@@ -376,7 +376,6 @@ with tab3:
       )
       dt_edit_obj = pd.to_datetime(selected_edit_date_str, format="%d.%m.%Y")
 
-      # O tarihe ait kayıtlı hava durumunu bulalım
       current_w_val = "Açık"
       current_t_val = 20
       if not df_weather.empty:
@@ -451,7 +450,6 @@ with tab3:
             "🔄 Değişiklikleri ve Hava Durumunu Güncelle"
         )
         if submit_edit:
-          # Siparişleri güncelle
           df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
           new_edit_rows = []
           for p_name, q_val in updated_qtys.items():
@@ -470,7 +468,6 @@ with tab3:
             )
             df_orders_save.to_csv(csv_archive_file, index=False)
 
-          # Hava durumunu güncelle
           if os.path.exists(csv_weather_file):
             df_w_up = pd.read_csv(csv_weather_file)
             df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
@@ -526,7 +523,7 @@ with tab3:
         )
         st.rerun()
 
-  # --- DÜZELTİLMİŞ: Sütun Başlığında Hava Durumu, İlk Satırda Tarih ---
+  # --- DÜZELTİLMİŞ: Sütun Başlığında "22°C - Açık", İlk Satırda Tarih ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Günler)")
 
@@ -534,7 +531,6 @@ with tab3:
     master_df = df_all.loc[:, ~df_all.columns.str.contains('^Unnamed')]
     product_col_name = master_df.columns[0]
 
-    # Yeni siparişleri ekleyelim
     if not df_orders.empty:
       df_orders["Clean_Product"] = (
           df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
@@ -560,34 +556,26 @@ with tab3:
 
       master_df = master_df.drop(columns=["Clean_Product"])
 
-    # --- SÜTUN İSİMLERİNİ HAVA DURUMU YAPMA VE İLK SATIRA TARİH YERLEŞTİRME ---
-    # Mevcut Excel kolon isimlerini (tarihleri) hava durumu sözlüğüne göre sütun başlığı (name) yapalım
-    # İlk veri satırına (veya yeni ekleyeceğimiz bir satıra) tarihleri yazdıralım.
-
     weather_dict = {}
     if not df_weather.empty:
       for _, w_row in df_weather.iterrows():
         d_str = w_row["Tarih"].strftime("%Y-%m-%d")
         w_cond = w_row.get("Hava Durumu", "")
-        t_val = w_row.get("Sıcaklık (°C)", "")
-        weather_dict[d_str] = f"{t_val} – {w_cond}"
+        t_val = str(w_row.get("Sıcaklık (°C)", "")).replace("°C", "").strip()
+        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
 
-    # Kolon adlarını yeniden yapılandıralım: Sütun başlığı Hava Durumu olsun, 1. satır Tarih olsun.
-    # Tarih kolonları için yeni bir sözlük oluşturalım
     rename_cols = {}
     date_row_data = {product_col_name: "TARİH"}
 
     for col in master_df.columns:
       if col != product_col_name:
-        # Col bir tarih mi kontrol edelim (YYYY-MM-DD veya benzeri)
         col_str = str(col).split()[0]
         if col_str in weather_dict:
-          # Sütun başlığını hava durumu yapıyoruz
           new_col_name = weather_dict[col_str]
           rename_cols[col] = new_col_name
-          date_row_data[new_col_name] = col_str
+          date_row_data[new_col_name] = col_str  # İlk satıra sadece tarih yazılıyor
         else:
-          # Eski Excel kolonları için sütun başlığı olarak bırakıp ilk satıra orijinal başlığı yazabiliriz
+          # Eski Excel kolonları için
           date_row_data[col] = str(col).split()[0]
 
     master_df = master_df.rename(columns=rename_cols)
