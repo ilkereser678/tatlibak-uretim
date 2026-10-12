@@ -1,7 +1,7 @@
-import asyncio
+import json
 import os
+from urllib.request import urlopen
 import pandas as pd
-import python_weather
 import streamlit as st
 
 st.set_page_config(
@@ -46,29 +46,25 @@ else:
   df_weather["Tarih"] = pd.to_datetime(df_weather["Tarih"])
 
 
-# İstanbul için anlık hava durumunu çeken asenkron fonksiyon
-async def get_istanbul_weather():
-  async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
-    # Metrik (°C) birim için unit=python_weather.METRIC kullanılır
-    pass
-
-
+# Harici paket istemeyen, doğrudan web servisinden İstanbul hava durumu çekme fonksiyonu
 @st.cache_data(ttl=3600)
 def fetch_live_weather():
-  async def main():
-    async with python_weather.Client(unit=python_weather.METRIC) as client:
-      weather = await client.get("Istanbul")
-      return weather.temperature, weather.description
-
   try:
-    return asyncio.run(main())
+    # Ücretsiz açık hava durumu API (wttr.in)
+    url = "https://wttr.in/Istanbul?format=j1"
+    response = urlopen(url, timeout=5)
+    data = json.loads(response.read().decode("utf-8"))
+    current = data["current_condition"][0]
+    temp = int(current["temp_C"])
+    desc = current["weatherDesc"][0]["value"]
+    return temp, desc
   except Exception:
-    return 20, "Açık"
+    return 20, "Clear"
 
 
 live_temp, live_desc = fetch_live_weather()
 
-# Türkçe hava durumu çevirisi için sözlük
+# Türkçe hava durumu çevirisi
 weather_translation = {
     "Sunny": "Açık",
     "Clear": "Açık",
@@ -76,6 +72,7 @@ weather_translation = {
     "Cloudy": "Bulutlu",
     "Overcast": "Çok Bulutlu",
     "Light rain": "Hafif Yağmurlu",
+    "Patchy rain possible": "Hafif Yağmurlu",
     "Moderate rain": "Yağmurlu",
     "Heavy rain": "Çok Yağmurlu",
 }
@@ -108,7 +105,6 @@ with tab1:
     st.markdown("---")
     st.markdown("🌤️ **İstanbul Hava & Çevre Koşulları (Canlı Otomatik)**")
 
-    # Otomatik çekilen verileri varsayılan olarak sunuyoruz
     weather_condition = st.selectbox(
         "Hava Durumu Etkisi",
         [
@@ -132,7 +128,7 @@ with tab1:
         step=1,
     )
     st.caption(
-        f"🌐 İstanbul anlık web servisi verisi: **{live_temp}°C, {live_desc}**"
+        f"🌐 İstanbul anlık web servis verisi: **{live_temp}°C, {live_desc}**"
     )
 
     special_day = st.selectbox(
@@ -392,137 +388,4 @@ with tab3:
               step=1,
           )
         if st.form_submit_button("🔄 Güncelle"):
-          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
-          new_edit_rows = [
-              {
-                  "Tarih": dt_edit_obj,
-                  "Pasta Çeşidi": p,
-                  "Gerçekleşen Sipariş": q,
-              }
-              for p, q in updated_qtys.items()
-              if q > 0
-          ]
-          if new_edit_rows:
-            df_orders = pd.concat(
-                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
-            )
-            df_orders.to_csv(csv_archive_file, index=False)
-
-          if os.path.exists(csv_weather_file):
-            df_w_up = pd.read_csv(csv_weather_file)
-            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
-            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
-          else:
-            df_w_up = pd.DataFrame(
-                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
-            )
-          new_w_row = pd.DataFrame([{
-              "Tarih": dt_edit_obj,
-              "Hava Durumu": edit_weather,
-              "Sıcaklık (°C)": f"{edit_temp}°C",
-          }])
-          pd.concat([df_w_up, new_w_row], ignore_index=True).to_csv(
-              csv_weather_file, index=False
-          )
-          st.success("✅ Güncellendi!")
-          st.rerun()
-
-  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO ---
-  st.markdown("---")
-  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
-
-  if df_all is not None:
-    master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
-    product_col_name = master_df.columns[0]
-
-    weather_dict = {}
-    if not df_weather.empty:
-      for _, w_row in df_weather.iterrows():
-        d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
-        w_cond = w_row.get("Hava Durumu", "Açık")
-        t_val = str(w_row.get("Sıcaklık (°C)", "20")).replace("°C", "").strip()
-        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
-
-    if not df_orders.empty:
-      df_orders["Clean_Product"] = (
-          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
-      )
-      pivot_orders = df_orders.pivot_table(
-          index="Clean_Product",
-          columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
-          values="Gerçekleşen Sipariş",
-          aggfunc="sum",
-      ).fillna(0)
-
-      master_df["Clean_Product"] = (
-          master_df[product_col_name].astype(str).str.strip().str.upper()
-      )
-
-      for date_col in pivot_orders.columns:
-        if date_col not in master_df.columns:
-          master_df[date_col] = 0
-        mapping_dict = pivot_orders[date_col].to_dict()
-        master_df[date_col] = (
-            master_df["Clean_Product"].map(mapping_dict).fillna(0)
-        )
-
-      master_df = master_df.drop(columns=["Clean_Product"])
-
-    rename_cols = {}
-    date_row_data = {product_col_name: "TARİH"}
-
-    for col in master_df.columns:
-      if col != product_col_name:
-        col_str = str(col).split()[0]
-        try:
-          formatted_date_str = pd.to_datetime(col_str).strftime("%d.%m.%y")
-        except:
-          formatted_date_str = col_str
-
-        if col_str in weather_dict:
-          new_header = weather_dict[col_str]
-          rename_cols[col] = new_header
-          date_row_data[new_header] = formatted_date_str
-        else:
-          rename_cols[col] = str(col)
-          date_row_data[str(col)] = formatted_date_str
-
-    master_df = master_df.rename(columns=rename_cols)
-    master_df = pd.concat(
-        [pd.DataFrame([date_row_data]), master_df], ignore_index=True
-    )
-
-    # Toplam satırını otomatik güncelleme
-    total_row_mask = (
-        master_df[product_col_name]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-        .str.contains("TOPLAM PASTA SAYISI", na=False)
-    )
-
-    if total_row_mask.any():
-      products_only_df = master_df[~total_row_mask].iloc[1:]
-      for col in master_df.columns:
-        if col != product_col_name:
-          numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
-          if not numeric_col.isna().all():
-            master_df.loc[total_row_mask, col] = int(numeric_col.sum())
-
-    # Sayısal sütunlardaki küsuratları kaldırma
-    for col in master_df.columns:
-      if col != product_col_name:
-        try:
-          temp_num = pd.to_numeric(master_df[col], errors="coerce")
-          if not temp_num.isna().all():
-            mask = master_df.index != 0
-            master_df.loc[mask, col] = (
-                temp_num[mask].fillna(0).astype(int).astype(str)
-            )
-            master_df.loc[master_df.index == 0, col] = date_row_data.get(
-                col, master_df.loc[0, col]
-            )
-        except:
-          pass
-
-    st.dataframe(master_df, use_container_width=True, height=500)
+          df_orders =
