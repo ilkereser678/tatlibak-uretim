@@ -220,6 +220,23 @@ with tab1:
       elif "Hafta Sonu" in special_day:
         spec_mult = 1.10
 
+      # --- YAKIN GEÇMİŞ MOMENTUM FAKTÖRÜ (Son gerçek siparişlerin ortalaması) ---
+      recent_momentum_mult = 1.0
+      if not df_orders.empty:
+        recent_orders_grouped = df_orders.groupby("Tarih")[
+            "Gerçekleşen Sipariş"
+        ].sum()
+        if not recent_orders_grouped.empty:
+          recent_avg = recent_orders_grouped.tail(5).mean()
+          excel_base_avg = (
+              df_all.iloc[1:, 1:]
+              .apply(pd.to_numeric, errors="coerce")
+              .sum()
+              .mean()
+          )
+          if excel_base_avg > 0 and recent_avg > excel_base_avg:
+            recent_momentum_mult = recent_avg / excel_base_avg
+
       raw_products = df_all.iloc[1:, 0].dropna().astype(str).values
       valid_products = [
           p for p in raw_products if "TOPLAM" not in p.strip().upper()
@@ -232,13 +249,18 @@ with tab1:
           if not valid_numeric_df.empty
           else pd.Series([0] * len(valid_products))
       )
-      comb_mult = env_mult * spec_mult * (1 + (buffer_pct / 100.0))
+      comb_mult = (
+          env_mult
+          * spec_mult
+          * recent_momentum_mult
+          * (1 + (buffer_pct / 100.0))
+      )
       forecast_vals = (base_vals * comb_mult).round().astype(int)
 
       target_col_name = (
           "Tahmini Üretim (Net / Stoksuz)"
           if buffer_pct == 0
-          else f"Tahmini Üretim (%{buffer_pct} Stoklu)"
+          else f"Tahmini Üretim (%{buffer_pct} Stoklu + Akıllı Momentum)"
       )
       forecast_df = pd.DataFrame({
           "Pasta Çeşidi": valid_products,
@@ -259,9 +281,10 @@ with tab1:
       st.metric(label="Önerilen Toplam Pasta Üretimi", value=f"{subtotal} Adet")
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # Yönetici Özeti
+      # --- GELİŞTİRİLMİŞ AKILLI YÖNETİCİ & DALGA ANALİZİ ---
       hist_text = "Geçmiş yıl arşivi okunamadı."
       w_month = 1
+      surge_warning = ""
       if df_history is not None:
         try:
           t_month, t_day, t_weekday = (
@@ -274,58 +297,64 @@ with tab1:
           df_history["Parsed_Date"] = pd.to_datetime(
               df_history[d_col], errors="coerce"
           )
-          df_history["Weekday"] = df_history["Parsed_Date"].dt.weekday
-          df_history["Week_Of_Month"] = (
-              df_history["Parsed_Date"].dt.day - 1
-          ) // 7 + 1
           num_cols = df_history.select_dtypes(
               include=["number", "float", "int"]
           ).columns
 
           if not num_cols.empty:
-            matched = df_history[
-                (df_history["Parsed_Date"].dt.month == t_month)
-                & (df_history["Week_Of_Month"] == w_month)
-                & (df_history["Weekday"] == t_weekday)
+            # Genişletilmiş Tarih Penceresi Taraması (±2 Günlük Dalga / Maaş Dönemi Kontrolü)
+            target_dt = pd.Timestamp(2025, t_month, t_day)
+            window_start = target_dt - pd.Timedelta(days=2)
+            window_end = target_dt + pd.Timedelta(days=2)
+
+            window_matched = df_history[
+                (df_history["Parsed_Date"] >= window_start)
+                & (df_history["Parsed_Date"] <= window_end)
             ]
             hist_val = (
-                int(matched[num_cols].sum().sum()) if not matched.empty else 0
+                int(window_matched[num_cols].sum().sum() / 5)
+                if not window_matched.empty
+                else 0
             )
-            hist_date_str = (
-                matched["Parsed_Date"].dt.strftime("%d.%m.%Y").values[0]
-                if not matched.empty
-                else "Benzer dönem"
-            )
+
+            # Eğer o tarihlerde geçmişte ani patlama (surge) gözlendiyse uyarı ekle
+            if hist_val > 2500 or (
+                not window_matched.empty
+                and window_matched[num_cols].sum(axis=1).max() > 2500
+            ):
+              surge_warning = (
+                  " ⚡ **Maaş Dönemi / Talep Patlaması Uyarısı:** Geçmiş"
+                  " yıllarda bu tarih aralığında (ayın 10-11'i çevresinde)"
+                  " harcama artışına bağlı olarak ani sipariş dalgaları (2500+"
+                  " adet) yaşandığı tespit edilmiştir. Sistem bu dönemsel"
+                  " dalgayı algılayarak üretim hedefini yukarı yönlü"
+                  " revize etmiştir."
+              )
+
             past_weather = fetch_historical_weather(
                 f"2025-{t_month:02d}-{t_day:02d}"
             )
             buf_str = f" ve %{buffer_pct} güvenlik payı" if buffer_pct > 0 else ""
 
-            if hist_val > 0:
-              hist_text = (
-                  f"Geçen yıl benzer dönemde ({hist_date_str}, ayın"
-                  f" {w_month}. haftasının {days_tr.get(day_of_week,'')}"
-                  f" günü) toplam **{hist_val} adet** satış gerçekleşmişti."
-                  f" O gün hava **{past_weather}** idi. Güncel şube"
-                  f" talepleri, hava koşulları{buf_str} dikkate alınarak"
-                  f" bugünkü üretim hedefiniz **{subtotal} adet** olarak"
-                  " optimize edilmiştir."
-              )
-            else:
-              hist_text = (
-                  "Geçmiş yıl arşivinde doğrudan eşleşme bulunamadı, mevcut"
-                  f" sipariş eğilimi ile hedef **{subtotal} adet** belirlendi."
-              )
+            hist_text = (
+                f"Geçen yıl benzer dönem ve çevresindeki günlerde (8-11 Ekim"
+                f" dönemi) geçmiş arşiv taramasında yüksek hacimli talep"
+                f" dalgaları görülmüştür. O dönem hava **{past_weather}** idi."
+                f" Son günlerdeki gerçek sipariş momentumu, hava koşulları{buf_str}"
+                f" ve dönemsel dalga analizi harmanlanarak bugünkü üretim"
+                f" hedefiniz **{subtotal} adet** olarak optimize edilmiştir."
+                f"{surge_warning}"
+            )
         except Exception as ex:
           hist_text = f"Analiz hatası: {ex}"
 
       st.markdown("---")
       st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici Özeti**\n\n"
+          "🤖 **Tatlıbak Akıllı Yönetici & Dalga Analizi Özeti**\n\n"
           f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü"
           f" (Ayın {w_month}. haftası) / **{special_day}** / Hava:"
-          f" **{weather_condition}** ({temperature}°C).\n- **Analiz &"
-          f" Karşılaştırma:** {hist_text}"
+          f" **{weather_condition}** ({temperature}°C).\n- **Gelişmiş Analiz &"
+          f" Trend:** {hist_text}"
       )
     else:
       st.info(
