@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 from urllib.request import urlopen
@@ -46,36 +47,70 @@ else:
   df_weather["Tarih"] = pd.to_datetime(df_weather["Tarih"])
 
 
-# Harici paket istemeyen, doğrudan web servisinden İstanbul hava durumu çekme fonksiyonu
+# İstanbul için 3 günlük saatlik (özellikle 17:00-21:00 akşam yoğunluğu) hava durumu tahmini çeken fonksiyon
 @st.cache_data(ttl=3600)
-def fetch_live_weather():
+def fetch_3day_evening_weather():
+  forecast_days = []
   try:
     url = "https://wttr.in/Istanbul?format=j1"
     response = urlopen(url, timeout=5)
     data = json.loads(response.read().decode("utf-8"))
-    current = data["current_condition"][0]
-    temp = int(current["temp_C"])
-    desc = current["weatherDesc"][0]["value"]
-    return temp, desc
+
+    # wttr.in 'weather' listesi bugünü ve sonraki günleri verir (genelde 3 gün)
+    for idx, day_data in enumerate(data.get("weather", [])[:3]):
+      date_str = day_data.get("date")
+      hourly_list = day_data.get("hourly", [])
+
+      evening_temps = []
+      evening_descs = []
+
+      for h in hourly_list:
+        try:
+          hour_val = int(h["time"]) // 100
+          if 17 <= hour_val <= 21:
+            evening_temps.append(int(h["tempC"]))
+            evening_descs.append(h["weatherDesc"][0]["value"])
+        except:
+          pass
+
+      if evening_temps:
+        avg_t = int(sum(evening_temps) / len(evening_temps))
+        common_d = max(set(evening_descs), key=evening_descs.count)
+      else:
+        avg_t = int(day_data.get("avgtempC", 20))
+        common_d = "Açık"
+
+      # Türkçe çeviri
+      tr_desc = {
+          "Sunny": "Açık",
+          "Clear": "Açık",
+          "Partly cloudy": "Parçalı Bulutlu",
+          "Cloudy": "Bulutlu",
+          "Overcast": "Çok Bulutlu",
+          "Light rain": "Hafif Yağmurlu",
+          "Patchy rain possible": "Hafif Yağmurlu",
+          "Moderate rain": "Yağmurlu",
+          "Heavy rain": "Çok Yağmurlu",
+      }.get(common_d, common_d)
+
+      day_name_map = {
+          0: "Bugün",
+          1: "Yarın",
+          2: "2 Gün Sonra (Satış Günü)",
+      }
+      forecast_days.append({
+          "Gün": day_name_map.get(idx, f"+{idx} Gün"),
+          "Tarih": date_str,
+          "Akşam Sıcaklık (17:00-21:00)": f"{avg_t}°C",
+          "Hava Durumu": tr_desc,
+      })
   except Exception:
-    return 20, "Clear"
+    pass
+
+  return forecast_days
 
 
-live_temp, live_desc = fetch_live_weather()
-
-# Türkçe hava durumu çevirisi
-weather_translation = {
-    "Sunny": "Açık",
-    "Clear": "Açık",
-    "Partly cloudy": "Parçalı Bulutlu",
-    "Cloudy": "Bulutlu",
-    "Overcast": "Çok Bulutlu",
-    "Light rain": "Hafif Yağmurlu",
-    "Patchy rain possible": "Hafif Yağmurlu",
-    "Moderate rain": "Yağmurlu",
-    "Heavy rain": "Çok Yağmurlu",
-}
-tr_live_desc = weather_translation.get(live_desc, "Açık / Güneşli (Normal)")
+three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
@@ -85,6 +120,20 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
   st.subheader("Günlük Veri Girişi ve Yarınki Üretim Planı")
+
+  # --- 3 GÜNLÜK HAVA DURUMU BİLGİ PANELİ ---
+  if three_day_forecast:
+    st.markdown("🌤️ **İstanbul 3 Günlük Akşam Yoğunluk (17:00 - 21:00) Hava Rehberi**")
+    f_cols = st.columns(len(three_day_forecast))
+    for i, day_info in enumerate(three_day_forecast):
+      with f_cols[i]:
+        st.metric(
+            label=f"{day_info['Gün']} ({day_info['Tarih']})",
+            value=day_info["Akşam Sıcaklık (17:00-21:00)"],
+            delta=day_info["Hava Durumu"],
+        )
+    st.markdown("---")
+
   col1, col2 = st.columns([1, 2])
 
   with col1:
@@ -102,7 +151,7 @@ with tab1:
     st.info(f"Seçilen Gün: **{days_tr.get(day_of_week, '')}**")
 
     st.markdown("---")
-    st.markdown("🌤️ **İstanbul Hava & Çevre Koşulları (Canlı Otomatik)**")
+    st.markdown("🌤️ **Üretim / Satış Günü Hava Koşulları Seçimi**")
 
     weather_condition = st.selectbox(
         "Hava Durumu Etkisi",
@@ -112,22 +161,14 @@ with tab1:
             "Çok Yağmurlu / Fırtınalı (Talep Düşüşü -%)",
             "Aşırı Sıcak / Güneşli (Ağır Tatlı Azalır)",
         ],
-        index=(
-            1
-            if "Bulut" in tr_live_desc
-            else (2 if "Yağmur" in tr_live_desc else 0)
-        ),
     )
 
     temperature = st.slider(
-        "Beklenen Sıcaklık (°C)",
+        "Beklenen Sıcaklık (°C) [Yukarıdaki tablodan bakabilirsiniz]",
         min_value=-5,
         max_value=40,
-        value=int(live_temp),
+        value=20,
         step=1,
-    )
-    st.caption(
-        f"🌐 İstanbul anlık web servis verisi: **{live_temp}°C, {live_desc}**"
     )
 
     special_day = st.selectbox(
@@ -207,8 +248,8 @@ with tab1:
       st.dataframe(forecast_df, use_container_width=True, height=450)
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Yarın İçin Tahmini Üretim Listesi"
-          " Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden 3 günlük hava tablosuna bakarak kriterleri seçip"
+          " **'Yarın İçin Tahmini Üretim Listesi Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
@@ -352,4 +393,192 @@ with tab3:
 
       col_e1, col_e2 = st.columns(2)
       with col_e1:
-        edit_weather = st.selectbox
+        edit_weather = st.selectbox(
+            "Hava Durumu Güncelle",
+            [
+                "Açık",
+                "Bulutlu",
+                "Hafif Çisenti",
+                "Hafif Yağmurlu",
+                "Çok Yağmurlu",
+                "Çok Bulutlu",
+            ],
+            index=(
+                [
+                    "Açık",
+                    "Bulutlu",
+                    "Hafif Çisenti",
+                    "Hafif Yağmurlu",
+                    "Çok Yağmurlu",
+                    "Çok Bulutlu",
+                ].index(current_w_val)
+                if current_w_val
+                in [
+                    "Açık",
+                    "Bulutlu",
+                    "Hafif Çisenti",
+                    "Hafif Yağmurlu",
+                    "Çok Yağmurlu",
+                    "Çok Bulutlu",
+                ]
+                else 0
+            ),
+            key="edit_w_sel",
+        )
+      with col_e2:
+        edit_temp = st.number_input(
+            "Sıcaklık (°C) Güncelle",
+            min_value=-10,
+            max_value=45,
+            value=current_t_val,
+            step=1,
+            key="edit_t_sel",
+        )
+
+      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
+      with st.form("edit_record_form"):
+        updated_qtys = {}
+        for _, row in day_records.iterrows():
+          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
+              f"{row['Pasta Çeşidi']}",
+              min_value=0,
+              max_value=500,
+              value=int(row["Gerçekleşen Sipariş"]),
+              step=1,
+          )
+        if st.form_submit_button("🔄 Güncelle"):
+          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
+          new_edit_rows = [
+              {
+                  "Tarih": dt_edit_obj,
+                  "Pasta Çeşidi": p,
+                  "Gerçekleşen Sipariş": q,
+              }
+              for p, q in updated_qtys.items()
+              if q > 0
+          ]
+          if new_edit_rows:
+            df_orders = pd.concat(
+                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
+            )
+            df_orders.to_csv(csv_archive_file, index=False)
+
+          if os.path.exists(csv_weather_file):
+            df_w_up = pd.read_csv(csv_weather_file)
+            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
+            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
+          else:
+            df_w_up = pd.DataFrame(
+                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
+            )
+          new_w_row = pd.DataFrame([{
+              "Tarih": dt_edit_obj,
+              "Hava Durumu": edit_weather,
+              "Sıcaklık (°C)": f"{edit_temp}°C",
+          }])
+          updated_weather_df = pd.concat(
+              [df_w_up, new_w_row], ignore_index=True
+          )
+          updated_weather_df.to_csv(csv_weather_file, index=False)
+          st.success("✅ Güncellendi!")
+          st.rerun()
+
+  # --- BİRLEŞTİRİLMİŞ MATRİS TABLO ---
+  st.markdown("---")
+  st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
+
+  if df_all is not None:
+    master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
+    product_col_name = master_df.columns[0]
+
+    weather_dict = {}
+    if not df_weather.empty:
+      for _, w_row in df_weather.iterrows():
+        d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
+        w_cond = w_row.get("Hava Durumu", "Açık")
+        t_val = str(w_row.get("Sıcaklık (°C)", "20")).replace("°C", "").strip()
+        weather_dict[d_str] = f"{t_val}°C - {w_cond}"
+
+    if not df_orders.empty:
+      df_orders["Clean_Product"] = (
+          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
+      )
+      pivot_orders = df_orders.pivot_table(
+          index="Clean_Product",
+          columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
+          values="Gerçekleşen Sipariş",
+          aggfunc="sum",
+      ).fillna(0)
+
+      master_df["Clean_Product"] = (
+          master_df[product_col_name].astype(str).str.strip().str.upper()
+      )
+
+      for date_col in pivot_orders.columns:
+        if date_col not in master_df.columns:
+          master_df[date_col] = 0
+        mapping_dict = pivot_orders[date_col].to_dict()
+        master_df[date_col] = (
+            master_df["Clean_Product"].map(mapping_dict).fillna(0)
+        )
+
+      master_df = master_df.drop(columns=["Clean_Product"])
+
+    rename_cols = {}
+    date_row_data = {product_col_name: "TARİH"}
+
+    for col in master_df.columns:
+      if col != product_col_name:
+        col_str = str(col).split()[0]
+        try:
+          formatted_date_str = pd.to_datetime(col_str).strftime("%d.%m.%y")
+        except:
+          formatted_date_str = col_str
+
+        if col_str in weather_dict:
+          new_header = weather_dict[col_str]
+          rename_cols[col] = new_header
+          date_row_data[new_header] = formatted_date_str
+        else:
+          rename_cols[col] = str(col)
+          date_row_data[str(col)] = formatted_date_str
+
+    master_df = master_df.rename(columns=rename_cols)
+    master_df = pd.concat(
+        [pd.DataFrame([date_row_data]), master_df], ignore_index=True
+    )
+
+    # Toplam satırını otomatik güncelleme
+    total_row_mask = (
+        master_df[product_col_name]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.contains("TOPLAM PASTA SAYISI", na=False)
+    )
+
+    if total_row_mask.any():
+      products_only_df = master_df[~total_row_mask].iloc[1:]
+      for col in master_df.columns:
+        if col != product_col_name:
+          numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
+          if not numeric_col.isna().all():
+            master_df.loc[total_row_mask, col] = int(numeric_col.sum())
+
+    # Sayısal sütunlardaki küsuratları kaldırma
+    for col in master_df.columns:
+      if col != product_col_name:
+        try:
+          temp_num = pd.to_numeric(master_df[col], errors="coerce")
+          if not temp_num.isna().all():
+            mask = master_df.index != 0
+            master_df.loc[mask, col] = (
+                temp_num[mask].fillna(0).astype(int).astype(str)
+            )
+            master_df.loc[master_df.index == 0, col] = date_row_data.get(
+                col, master_df.loc[0, col]
+            )
+        except:
+          pass
+
+    st.dataframe(master_df, use_container_width=True, height=500)
