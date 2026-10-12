@@ -11,7 +11,54 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍰 Tatlıbak Yaş Pasta Üretim & Talep Patlaması Tahmin Motoru")
+st.title("🍰 Tatlıbak Yaş Pasta AI Üretim & Sipariş Planlama Asistanı")
+
+# --- GEMINI AI REST API & SECRETS ENTEGRASYONU ---
+api_key = None
+try:
+  api_key = st.secrets.get("GEMINI_API_KEY")
+except:
+  pass
+
+if not api_key:
+  api_key = os.environ.get(
+      "GEMINI_API_KEY", "AQ.Ab8RN6LuBHy8LkB7IkvFlX2yeJPov0Tw-XZzorZZMhx7IdsLgQ"
+  )
+
+
+def call_gemini_api(prompt_text):
+  if not api_key:
+    return (
+        "⚠️ Gemini API anahtarı bulunamadı! Lütfen .streamlit/secrets.toml"
+        " dosyanızı kontrol edin."
+    )
+
+  # Google AI Studio Gemini API endpoint (v1beta)
+  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+  headers = {"Content-Type": "application/json"}
+  payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
+
+  try:
+    req = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urlopen(req, timeout=25) as response:
+      res_data = json.loads(response.read().decode("utf-8"))
+      return (
+          res_data.get("candidates", [{}])
+          .get("content", {})
+          .get("parts", [{}])[0]
+          .get("text", "Yapay zeka yanıt döndüremedi.")
+      )
+  except Exception as e:
+    return (
+        f"Gemini API bağlantı hatası (401 veya Ağ): {e}. Lütfen API anahtarınızı"
+        " kontrol edin."
+    )
+
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
@@ -70,7 +117,7 @@ def fetch_3day_evening_weather():
   forecast_days = []
   try:
     url = "https://wttr.in/Istanbul?format=j1"
-    response = urlopen(url, timeout=3)
+    response = urlopen(url, timeout=4)
     data = json.loads(response.read().decode("utf-8"))
 
     for idx, day_data in enumerate(data.get("weather", [])[:3]):
@@ -123,7 +170,7 @@ def fetch_3day_evening_weather():
 three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Dinamik Üretim Tahmini & Analiz",
+    "🚀 Gemini AI Üretim Tahmini & Analiz",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
@@ -131,7 +178,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Gelişmiş Dinamik Talep Patlaması ve Üretim Planlama Motoru"
+      "🤖 Gerçek Gemini AI Zekası ile Dinamik Üretim & Talep Patlaması Analizi"
   )
 
   if three_day_forecast:
@@ -189,114 +236,72 @@ with tab1:
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
     ai_hesapla_button = st.button(
-        "🧠 Dinamik Akıllı Üretim Planı ve Dağılım Hesapla"
+        "🧠 Gemini AI ile Gerçek Zamanlı Analiz ve Üretim Planı Oluştur"
     )
 
   with col2:
     if ai_hesapla_button:
       with st.spinner(
-          "🧠 Gün bazlı ağırlıklar, geçmiş sıçrama oranları ve dönemsel"
-          " katsayılar hesaplanıyor..."
+          "🧠 Gemini AI geçmiş arşivi, gün farklarını, maaş dönemi sarmalını ve"
+          " sipariş momentumunu derinlemesine analiz ediyor..."
       ):
         try:
-          # --- DİNAMİK MATEMATİKSEL HESAPLAMA MOTORU ---
-          # 1. Gün bazlı baz talep katsayıları (Hafta içi daha düşük, Cuma/Cumartesi yüksek patlama)
-          day_weights = {
-              "Pazartesi": 0.75,
-              "Salı": 0.80,
-              "Çarşamba": 0.85,
-              "Perşembe": 0.95,
-              "Cuma": 1.25,
-              "Cumartesi": 1.35,
-              "Pazar": 1.10,
-          }
-
-          base_average = (
-              2200  # Genel ortalama baz alınır, gün katsayısıyla çarpılır
+          recent_orders_summary = (
+              df_orders.tail(20).to_string()
+              if not df_orders.empty
+              else "Henüz günlük sipariş girilmemiş."
           )
-          day_multiplier = day_weights.get(turkish_day, 1.00)
-
-          # 2. Özel durum çarpanı
-          special_multiplier = 1.00
-          if "Maaş" in special_day:
-            special_multiplier = 1.18
-          elif "Hafta Sonu" in special_day:
-            special_multiplier = 1.12
-          elif "Yılbaşı" in special_day:
-            special_multiplier = 1.40
-          elif "Tatil" in special_day or "Bayram" in special_day:
-            special_multiplier = 1.25
-
-          # 3. Hava durumu ve sıcaklık etkisi
-          weather_modifier = 1.00
-          if "Yağmurlu" in weather_condition:
-            weather_modifier = 0.92  # Yağmurda dışarı çıkış azalır, talep hafif düşer
-          elif "Sıcak" in weather_condition and temperature > 30:
-            weather_modifier = 0.95
-
-          # Nihai toplam hedef hesaplama (Dinamik)
-          raw_target = base_average * day_multiplier * special_multiplier * weather_modifier
-          calculated_total = int(raw_target * (1 + buffer_pct / 100.0))
-
-          st.markdown("### 📊 Yönetici Özeti & Dinamik Dalga Analizi")
-          st.success(
-              f"**Hedef Tarih:** {selected_date.strftime('%d.%m.%Y')}"
-              f" ({turkish_day}) için talep tahmini başarıyla çıkarıldı."
+          history_summary = (
+              df_history.head(30).to_string()
+              if df_history is not None
+              else "Geçmiş arşiv yok."
           )
-          st.markdown(f"""
-                * **Gün Bazlı Ağırlık ({turkish_day}):** Geçmiş arşivlerdeki günlik sirkülasyon katsayısı (`{day_multiplier}x`) baz alınmıştır.
-                * **Dönemsel & Çevresel Etki:** Özel durum **'{special_day}'** ve hava koşulları ({weather_condition}, {temperature}°C) modele yansıtılmıştır.
-                * **Güvenlik Payı:** Seçilen %{buffer_pct} stok payı dahil edilmiştir.
-                * **Önerilen Toplam Üretim Hedefi:** **{calculated_total} Adet**
-                """)
+          base_excel_summary = (
+              df_all.head(30).to_string()
+              if df_all is not None
+              else "Excel verisi yok."
+          )
 
-          st.markdown("### 📋 Ürün Bazlı Oransal Üretim Dağılım Listesi")
-          if df_all is not None:
-            # Excel tablosundaki ürünleri alıp dinamik orantıyla dağıtıyoruz
-            prod_rows = []
-            excel_products = [
-                p
-                for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
-                if "TOPLAM" not in p.strip().upper()
-            ]
+          prompt = f"""
+            Sen profesyonel bir gıda ve pastacılık üretim planlama yapay zeka uzmanısın. Tatlıbak şubeleri için yaş pasta üretim tahminlemesi yapıyorsun. Sabit ve ezbere rakamlar asla verme; seçilen günün özelliklerine, haftanın hangi gününe denk geldiğine ve dönemsel dalgalara göre her defasında tamamen dinamik ve mantıksal hesaplama yap.
+            
+            KRİTİK BAĞLAM VE GEÇMİŞ VERİLER:
+            - Geçmiş arşivlerde (ekim ayı başı / maaş dönemi sarmalında) Perşembe günleri 1452 adet olan siparişlerin Cuma/Cumartesi günleri 2339+ adetlere ani patlama (surge) yaşadığı bilinmektedir.
+            - Son hafta sonu şubelerden gelen gerçek siparişler 2940 adeti bulmuştur.
+            
+            HEDEF ANALİZ KRİTERLERİ:
+            - Hedef Tarih ve Gün: {selected_date.strftime('%d.%m.%Y')} ({turkish_day})
+            - Özel Durum / Dönem: {special_day}
+            - Hava Durumu & Sıcaklık: {weather_condition}, {temperature}°C
+            - Güvenlik / Stok Payı: %{buffer_pct}
+            
+            VERİ KAYNAKLARI:
+            1. Son Girilen Gerçek Siparişler:
+            {recent_orders_summary}
+            
+            2. Geçmiş Yıllar Arşivi:
+            {history_summary}
+            
+            3. Ürün Çeşit Yapısı (Eylül Sipariş Listesi):
+            {base_excel_summary}
+            
+            GÖREVLERİN:
+            1. Sabit ortalamalara veya kalıp sayılara asla takılma. Seçilen günün (örneğin Pazartesi sükuneti ile Cumartesi patlamasının farkını gözeterek) geçmişteki ani sıçrama eğrilerini (1452 -> 2339) ve son 2940 sipariş momentumunu akıllıca harmanlayarak **o güne özel** gerçekçi bir toplam üretim hedefi belirle.
+            2. Ürün çeşitlerine göre bu toplam hedefi mantıklı ve adil bir oranla paylaştır.
+            3. Yöneticiye şu formatta kusursuz bir rapor sun:
+               - **Yönetici Özeti & Dalga Analizi:** Seçilen günün özelliklerinin (Pazartesi, Cuma vb.) talebi nasıl etkilediğini, geçmiş sıçrama dinamikleriyle birlikte profesyonel ve eleştirel bir dille detaylıca açıkla.
+               - **Üretim Listesi Raporu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
+            """
 
-            # Ürün sayısına göre adil ve gerçekçi paylaştırma
-            import random
-
-            # Her ürüne geçmiş yüzdesine benzer ağırlıklar verelim
-            total_items = len(excel_products)
-            distributed_sum = 0
-
-            sim_data = []
-            for idx, prod in enumerate(excel_products):
-              # Her ürünün pastadaki genel payı simüle ediliyor
-              share_factor = (
-                  1.5
-                  if "BÜYÜK" in prod.upper()
-                  else (0.8 if "KÜÇÜK" in prod.upper() else 1.0)
-              )
-              item_target = max(
-                  5, int((calculated_total / total_items) * share_factor)
-              )
-              sim_data.append({
-                  "Pasta Çeşidi": prod,
-                  "Önerilen Üretim Adeti": item_target,
-              })
-
-            res_df = pd.DataFrame(sim_data)
-            st.dataframe(res_df, use_container_width=True, height=400)
-            st.info(
-                f"✨ **DİNAMİK TOPLAM ÜRETİM:** {calculated_total} Adet (Seçilen"
-                f" gün ve kriterlere göre özel hesaplanmıştır.)"
-            )
+          ai_text = call_gemini_api(prompt)
+          st.markdown(ai_text)
 
         except Exception as ex:
-          st.error(f"Hesaplama sırasında hata oluştu: {ex}")
+          st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
     else:
       st.info(
-          "👈 Sol panelden tarihi, özel durumu ve güvenlik payını seçip"
-          " **'Dinamik Akıllı Üretim Planı ve Dağılım Hesapla'** butonuna"
-          " tıklayın."
+          "👈 Sol panelden tarihi, günü ve kriterleri seçip **'Gemini AI ile"
+          " Gerçek Zamanlı Analiz ve Üretim Planı Oluştur'** butonuna tıklayın."
       )
 
 with tab2:
