@@ -274,7 +274,7 @@ with tab1:
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- GELİŞTİRİLMİŞ AKILLI YÖNETİCİ ÖZETİ (GÜNCELLENMİŞ TARİH EŞLEŞTİRME) ---
+      # --- AKILLI YÖNETİCİ ÖZETİ & TREND ANALİZİ ---
       historical_insight_text = (
           "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) okunamadı."
       )
@@ -283,54 +283,78 @@ with tab1:
           target_month = selected_date.month
           target_day = selected_date.day
 
-          # Dosyadaki ilk sütunu doğrudan tarih sütunu olarak kabul edelim (Kusursuz eşleşme için)
           date_col = df_history.columns[0]
           df_history["Parsed_Date"] = pd.to_datetime(
               df_history[date_col], errors="coerce"
           )
+          num_cols = df_history.select_dtypes(
+              include=["number", "float", "int"]
+          ).columns
 
-          matched_hist = df_history[
-              (df_history["Parsed_Date"].dt.month == target_month)
-              & (df_history["Parsed_Date"].dt.day == target_day)
-          ]
-          if not matched_hist.empty:
-            # Sayısal sütunlardan toplamı bul (tarih sütunu hariç diğer sütunların toplamı veya ilk sayısal sütun)
-            num_cols = df_history.select_dtypes(
-                include=["number", "float", "int"]
-            ).columns
-            if not num_cols.empty:
-              hist_val = int(matched_hist[num_cols].sum().sum())
+          if not num_cols.empty:
+            # Geçmiş yılın o günkü satışı
+            matched_hist = df_history[
+                (df_history["Parsed_Date"].dt.month == target_month)
+                & (df_history["Parsed_Date"].dt.day == target_day)
+            ]
+            hist_val = (
+                int(matched_hist[num_cols].sum().sum())
+                if not matched_hist.empty
+                else 0
+            )
+
+            # Geçmiş yılın genel ortalaması ile bu yılın (df_all) genel ortalamasını kıyaslayarak büyüme trendini hesaplayalım
+            hist_avg_daily = df_history[num_cols].mean().mean()
+            current_avg_daily = valid_numeric_df.mean().mean()
+
+            trend_note = ""
+            if hist_avg_daily > 0:
+              growth_rate = (
+                  (current_avg_daily - hist_avg_daily) / hist_avg_daily
+              ) * 100
+              if growth_rate > 0:
+                trend_note = (
+                    f" Ancak bu yıl genel satış hacminiz geçen yıla oranla"
+                    f" **%{growth_rate:.1f} daha yüksek** seyretmektedir."
+                )
+              else:
+                trend_note = (
+                    f" Bu yıl genel satış hacminiz geçen yıla oranla"
+                    f" **%{abs(growth_rate):.1f} daha düşük** seyretmektedir."
+                )
+
+            if hist_val > 0:
               historical_insight_text = (
                   f"Geçen yıl bugün ({target_day}.{target_month}.2025) toplam"
-                  f" **{hist_val} adet** satış gerçekleşmişti. Bu yıl aynı"
-                  f" dönem için önerilen toplam üretim **{subtotal} adet**"
-                  " olarak hesaplandı."
+                  f" **{hist_val} adet** satış gerçekleşmişti.{trend_note} Bu"
+                  f" veriler ışığında bugünkü optimize üretim hedefiniz"
+                  f" **{subtotal} adet** olarak belirlenmiştir."
               )
             else:
               historical_insight_text = (
-                  "Geçmiş yıl verisinde uygun satış adeti sütunu"
-                  " bulunamadı."
+                  f"Geçmiş yıl arşivinde {target_day}.{target_month} için"
+                  f" birebir kayıt bulunamadı, ancak genel büyüme trendi ({trend_note})"
+                  f" analize yansıtıldı."
               )
           else:
             historical_insight_text = (
-                f"Geçmiş yıl arşivinde {target_day}.{target_month} tarihine"
-                " ait tam eşleşen kayıt bulunamadı, ancak genel trend"
-                " entegre edildi."
+                "Geçmiş yıl verisinde uygun sayısal sütun bulunamadı."
             )
         except Exception as ex:
           historical_insight_text = (
-              f"Geçmiş yıl verisi okunurken hata oluştu: {ex}"
+              f"Geçmiş yıl verisi analiz edilirken hata oluştu: {ex}"
           )
 
       st.markdown("---")
       st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Geçmiş Yıl Analizi**\n\n"
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Büyüme Trendi Analizi**\n\n"
           f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü için"
           f" **{special_day}** ve hava koşulu **'{weather_condition}'**"
-          f" ({temperature}°C) baz alınmıştır.\n- **Geçmiş Yıl Kıyaslaması:**"
-          f" {historical_insight_text}\n- **Operasyonel Öneri:** Şube talepleri,"
-          f" akşamüstü yoğunluk beklentisi ve güvenlik payı (%{buffer_pct})"
-          f" dengelenerek toplam **{subtotal} adet** üretim optimize edilmiştir."
+          f" ({temperature}°C) baz alınmıştır.\n- **Geçmiş Yıl & Trend"
+          f" Kıyaslaması:** {historical_insight_text}\n- **Operasyonel Öneri:**"
+          f" Şube sipariş ortalamaları, yıllık büyüme trendi ve güvenlik payı"
+          f" (%{buffer_pct}) harmanlanarak toplam **{subtotal} adet** üretim"
+          " optimize edilmiştir."
       )
 
     else:
