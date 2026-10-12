@@ -523,7 +523,7 @@ with tab3:
         )
         st.rerun()
 
-  # --- DÜZELTİLMİŞ: Sütun Başlığında "22°C - Açık", İlk Satırda Tarih ---
+  # --- KUSURSUZ MATRİS TABLO DÜZENİ ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu (Excel + Yeni Günler)")
 
@@ -564,25 +564,15 @@ with tab3:
         t_val = str(w_row.get("Sıcaklık (°C)", "")).replace("°C", "").strip()
         weather_dict[d_str] = f"{t_val}°C - {w_cond}"
 
+    # Sütun başlıklarını sadece Hava Durumu / Sıcaklık yapıyoruz
     rename_cols = {}
-    date_row_data = {product_col_name: "TARİH"}
-
     for col in master_df.columns:
       if col != product_col_name:
         col_str = str(col).split()[0]
         if col_str in weather_dict:
-          new_col_name = weather_dict[col_str]
-          rename_cols[col] = new_col_name
-          date_row_data[new_col_name] = col_str  # İlk satıra sadece tarih yazılıyor
-        else:
-          # Eski Excel kolonları için
-          date_row_data[col] = str(col).split()[0]
+          rename_cols[col] = weather_dict[col_str]
 
     master_df = master_df.rename(columns=rename_cols)
-
-    # Tarih satırını tablonun en başına ekleyelim
-    date_df_row = pd.DataFrame([date_row_data])
-    master_df = pd.concat([date_df_row, master_df], ignore_index=True)
 
     # Toplam satırını otomatik güncelleme
     total_row_mask = (
