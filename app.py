@@ -46,7 +46,7 @@ else:
 tab1, tab2, tab3 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
     "📝 Günlük Sipariş Girişi",
-    "📂 Arşiv & Geçmiş Siparişler",
+    "📂 Arşiv & Matris Tablo",
 ])
 
 with tab1:
@@ -92,9 +92,6 @@ with tab1:
             "Resmi Tatil / Bayram (29 Ekim, 23 Nisan vb.)",
             "Hafta Sonu / Cuma Akşamı Yoğunluğu",
         ],
-    )
-    total_actual_pasta = st.number_input(
-        "Bugünkü Gerçekleşen Toplam Pasta", min_value=0, max_value=5000, value=2138
     )
     buffer_pct = st.selectbox(
         "Stok / Güvenlik Payı Ekle (%)", [0, 5, 10, 15, 20, 25], index=2
@@ -315,26 +312,7 @@ with tab3:
                 "Çok Yağmurlu",
                 "Çok Bulutlu",
             ],
-            index=(
-                [
-                    "Açık",
-                    "Bulutlu",
-                    "Hafif Çisenti",
-                    "Hafif Yağmurlu",
-                    "Çok Yağmurlu",
-                    "Çok Bulutlu",
-                ].index(current_w_val)
-                if current_w_val
-                in [
-                    "Açık",
-                    "Bulutlu",
-                    "Hafif Çisenti",
-                    "Hafif Yağmurlu",
-                    "Çok Yağmurlu",
-                    "Çok Bulutlu",
-                ]
-                else 0
-            ),
+            index=0,
             key="edit_w_sel",
         )
       with col_e2:
@@ -394,18 +372,14 @@ with tab3:
           st.success("✅ Güncellendi!")
           st.rerun()
 
-    st.markdown("---")
-    if st.button("🗑️ Seçilen Tarihe Ait Kayıtları Sil"):
-      # Silme mantığı
-      pass
-
-  # --- TERTEMİZ MATRİS TABLO ---
+  # --- TERTEMİZ VE KARIŞMAYAN MATRİS TABLO ---
   st.markdown("---")
   st.subheader("📂 Birleştirilmiş Ana Arşiv Tablosu")
 
   if df_all is not None:
-    master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
-    product_col_name = master_df.columns[0]
+    # Sadece ürün isimlerini içeren ana listeyi alalım
+    base_products = df_all.iloc[1:, 0].dropna().astype(str).tolist()
+    master_df = pd.DataFrame({"Pasta Çeşidi": base_products})
 
     weather_dict = {}
     if not df_weather.empty:
@@ -427,58 +401,49 @@ with tab3:
       ).fillna(0)
 
       master_df["Clean_Product"] = (
-          master_df[product_col_name].astype(str).str.strip().str.upper()
+          master_df["Pasta Çeşidi"].astype(str).str.strip().str.upper()
       )
+
       for date_col in pivot_orders.columns:
-        if date_col not in master_df.columns:
-          master_df[date_col] = 0
+        mapping_dict = pivot_orders[date_col].to_dict()
         master_df[date_col] = (
-            master_df["Clean_Product"]
-            .map(pivot_orders[date_col].to_dict())
-            .fillna(0)
+            master_df["Clean_Product"].map(mapping_dict).fillna(0)
         )
+
       master_df = master_df.drop(columns=["Clean_Product"])
 
-    # Sütun başlıkları: "Sıcaklık - Hava Durumu"
-    # İlk satır: Sadece GG.AA.YY formatında tarih (10.10.26)
-    rename_cols = {}
-    date_row_data = {product_col_name: "TARİH"}
+    # Sütun başlıkları: "Sıcaklık - Hava Durumu", İlk satır: "10.10.26"
+    rename_cols = {"Pasta Çeşidi": "ÜRÜN ÇEŞİDİ"}
+    date_row_data = {"ÜRÜN ÇEŞİDİ": "TARİH"}
 
     for col in master_df.columns:
-      if col != product_col_name:
-        col_clean = str(col).split()[0]
-        try:
-          formatted_date_str = pd.to_datetime(col_clean).strftime("%d.%m.%y")
-        except:
-          formatted_date_str = col_clean
-
-        if col_clean in weather_dict:
-          new_header = weather_dict[col_clean]
+      if col != "Pasta Çeşidi":
+        # col bir tarihtir (YYYY-MM-DD)
+        formatted_date_str = pd.to_datetime(col).strftime("%d.%m.%y")
+        if col in weather_dict:
+          new_header = weather_dict[col]
           rename_cols[col] = new_header
           date_row_data[new_header] = formatted_date_str
         else:
-          # Excel'den gelen eski kolonlar için başlığı koruyup alt satıra tarihi basalım
-          date_row_data[col] = formatted_date_str
+          rename_cols[col] = f"20°C - Açık ({col})"
+          date_row_data[rename_cols[col]] = formatted_date_str
 
     master_df = master_df.rename(columns=rename_cols)
     master_df = pd.concat(
         [pd.DataFrame([date_row_data]), master_df], ignore_index=True
     )
 
-    # Toplam satırı hesaplama
-    total_row_mask = (
-        master_df[product_col_name]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-        .str.contains("TOPLAM PASTA SAYISI", na=False)
+    # Toplam Pasta Sayısı Satırı ekleme
+    total_row = {"ÜRÜN ÇEŞİDİ": "TOPLAM PASTA SAYISI"}
+    for col in master_df.columns:
+      if col != "ÜRÜN ÇEŞİDİ":
+        numeric_col = pd.to_numeric(
+            master_df[col].iloc[1:], errors="coerce"
+        )  # 0. satır tarih olduğu için 1'den başla
+        total_row[col] = numeric_col.sum()
+
+    master_df = pd.concat(
+        [master_df, pd.DataFrame([total_row])], ignore_index=True
     )
-    if total_row_mask.any():
-      products_only_df = master_df[~total_row_mask]
-      for col in master_df.columns:
-        if col != product_col_name:
-          numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
-          if not numeric_col.isna().all():
-            master_df.loc[total_row_mask, col] = numeric_col.sum()
 
     st.dataframe(master_df, use_container_width=True, height=500)
