@@ -50,7 +50,6 @@ else:
 @st.cache_data(ttl=3600)
 def fetch_live_weather():
   try:
-    # Ücretsiz açık hava durumu API (wttr.in)
     url = "https://wttr.in/Istanbul?format=j1"
     response = urlopen(url, timeout=5)
     data = json.loads(response.read().decode("utf-8"))
@@ -371,21 +370,4 @@ with tab3:
             "Sıcaklık (°C) Güncelle",
             min_value=-10,
             max_value=45,
-            value=current_t_val,
-            step=1,
-            key="edit_t_sel",
-        )
-
-      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
-      with st.form("edit_record_form"):
-        updated_qtys = {}
-        for _, row in day_records.iterrows():
-          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
-              f"{row['Pasta Çeşidi']}",
-              min_value=0,
-              max_value=500,
-              value=int(row["Gerçekleşen Sipariş"]),
-              step=1,
-          )
-        if st.form_submit_button("🔄 Güncelle"):
-          df_orders =
+            value=current_t_
