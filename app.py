@@ -1,9 +1,8 @@
 import datetime
 import json
 import os
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import pandas as pd
-from google import genai
 import streamlit as st
 
 st.set_page_config(
@@ -14,21 +13,39 @@ st.set_page_config(
 
 st.title("🍰 Tatlıbak Yaş Pasta AI Üretim & Sipariş Planlama Asistanı")
 
-# --- GEMINI API YAPILANDIRMASI ---
-# Streamlit Secrets (st.secrets["GEMINI_API_KEY"]) veya doğrudan çevre değişkeni üzerinden API anahtarını alır
+# --- GEMINI REST API YAPILANDIRMASI (Harici paket gerektirmez) ---
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
-ai_client = None
-if api_key:
+
+def call_gemini_api(prompt_text):
+  if not api_key:
+    return (
+        "⚠️ Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets ayarlarına"
+        " `GEMINI_API_KEY` ekleyin."
+    )
+
+  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+  headers = {"Content-Type": "application/json"}
+  payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
+
   try:
-    ai_client = genai.Client(api_key=api_key)
+    req = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urlopen(req, timeout=15) as response:
+      res_data = json.loads(response.read().decode("utf-8"))
+      return (
+          res_data.get("candidates", [{}])
+          .get("content", {})
+          .get("parts", [{}])[0]
+          .get("text", "Yapay zeka yanıt döndüremedi.")
+      )
   except Exception as e:
-    st.error(f"Gemini AI istemcisi başlatılamadı: {e}")
-else:
-  st.warning(
-      "⚠️ Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets veya çevre"
-      " değişkenlerine `GEMINI_API_KEY` ekleyin."
-  )
+    return f"Gemini API bağlantı hatası: {e}"
+
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
@@ -208,10 +225,10 @@ with tab1:
 
   with col2:
     if ai_hesapla_button:
-      if not ai_client:
+      if not api_key:
         st.error(
-            "Gemini API anahtarı tanımlı olmadığı için AI analizi"
-            " yapılamıyor!"
+            "Gemini API anahtarı bulunamadı! Lütfen Streamlit Secrets"
+            " ayarlarına `GEMINI_API_KEY` ekleyin."
         )
       else:
         with st.spinner(
@@ -219,7 +236,6 @@ with tab1:
             " dönemi dalgalarını analiz ediyor..."
         ):
           try:
-            # Arşivden ve son siparişlerden veri özetleri hazırlayalım
             recent_orders_summary = (
                 df_orders.tail(10).to_string()
                 if not df_orders.empty
@@ -261,24 +277,10 @@ with tab1:
             3. Yöneticiye şu formatta net bir rapor sun:
                - **Yönetici Özeti & Dalga Analizi:** Neden bu rakama ulaşıldığını (geçmiş zıplamalar ve son momentumla birlikte) profesyonel ve eleştirel bir dille açıkla.
                - **Üretim Listesi Tablosu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
-            
-            Çıktıyı Streamlit'in işleyebileceği temiz bir formatta ver. Raporun ardından, ürün ve önerilen üretim adetlerini içeren bir JSON bloğunu ```json ... ``` arasında ver ki bunu tabloya dökebilelim.
             """
 
-            response = ai_client.models.generate_content(
-                model="gemini-2.5-flash", contents=prompt
-            )
-            ai_text = response.text
-
+            ai_text = call_gemini_api(prompt)
             st.markdown(ai_text)
-
-            # JSON verisini ayıklayıp tablo oluşturma denemesi
-            if "```json" in ai_text:
-              json_str = ai_text.split("```json")[1].split("```")[0].strip()
-              ai_data = json.loads(json_str)
-              if isinstance(ai_data, list):
-                ai_df = pd.DataFrame(ai_data)
-                st.dataframe(ai_df, use_container_width=True)
 
           except Exception as ex:
             st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
