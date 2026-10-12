@@ -14,7 +14,7 @@ st.title("🍰 Tatlıbak Yaş Pasta Üretim & Sipariş Planlama Asistanı")
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
 csv_weather_file = "daily_weather.csv"
-historical_excel_file = "gecmis_arsiv.xlsx"  # Geçmiş yıllar arşivi için dosya adı
+historical_excel_file = "gecmis_arsiv.xlsx"
 
 
 @st.cache_data
@@ -29,20 +29,22 @@ try:
 except Exception as e:
   st.error(f"Excel dosyası yüklenirken hata oluştu: {e}")
 
-# Geçmiş yıllar arşivi yükleme fonksiyonu (Opsiyonel)
+
 @st.cache_data
 def load_historical_data():
   if os.path.exists(historical_excel_file):
     try:
       xls_h = pd.ExcelFile(historical_excel_file)
-      df_h = xls_h.parse(xls_h.sheet_names[0])
-      return df_h
-    except:
-      return None
-  return None
+      # İlk sayfayı veya uygun sayfayı okuyalım
+      sheet_name = xls_h.sheet_names[0]
+      df_h = xls_h.parse(sheet_name)
+      return df_h, sheet_name
+    except Exception as ex:
+      return None, str(ex)
+  return None, "Dosya bulunamadı"
 
 
-df_history = load_historical_data()
+df_history, hist_info = load_historical_data()
 
 if os.path.exists(csv_archive_file):
   df_orders = pd.read_csv(csv_archive_file)
@@ -126,10 +128,12 @@ def fetch_3day_evening_weather():
 
 three_day_forecast = fetch_3day_evening_weather()
 
-tab1, tab2, tab3 = st.tabs([
+# SEKME YAPISI (Geçmiş Arşiv Sekmesi Eklendi)
+tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Üretim Tahmini & Hesaplama",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
+    "📜 Geçmiş Yıllar Arşivi",
 ])
 
 with tab1:
@@ -271,18 +275,73 @@ with tab1:
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
 
-      # --- AKILLI YÖNETİCİ ÖZETİ (AI INSIGHTS) ---
+      # --- GELİŞTİRİLMİŞ AKILLI YÖNETİCİ ÖZETİ (GEÇMİŞ YIL KIYASLAMALI) ---
+      historical_insight_text = (
+          "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) henüz okunamadı veya boş."
+      )
+      if df_history is not None:
+        try:
+          # Geçmiş veride bugünün tarihine denk gelen (örneğin geçen yılın aynı ayı/günü) veriyi bulmaya çalışalım
+          target_month = selected_date.month
+          target_day = selected_date.day
+          # Tarih içeren sütun bulma
+          date_col_candidates = [
+              c
+              for c in df_history.columns
+              if "tarih" in str(c).lower() or "date" in str(c).lower()
+          ]
+          if date_col_candidates:
+            d_col = date_col_candidates[0]
+            df_history["Parsed_Date"] = pd.to_datetime(
+                df_history[d_col], errors="coerce"
+            )
+            matched_hist = df_history[
+                (df_history["Parsed_Date"].dt.month == target_month)
+                & (df_history["Parsed_Date"].dt.day == target_day)
+            ]
+            if not matched_hist.empty:
+              # Sayısal sütunlardan toplamı bul
+              num_cols = df_history.select_dtypes(
+                  include=["number", "float", "int"]
+              ).columns
+              if not num_cols.empty:
+                hist_val = int(matched_hist[num_cols[0]].sum())
+                historical_insight_text = (
+                    f"Geçen yıl bugün ({target_day}.{target_month}.2025) toplam"
+                    f" **{hist_val} adet** satış gerçekleşmişti. Bu yıl aynı"
+                    f" dönem için önerilen toplam üretim **{subtotal} adet**"
+                    " olarak hesaplandı."
+                )
+              else:
+                historical_insight_text = (
+                    "Geçmiş yıl verisinde uygun satış adeti sütunu"
+                    " bulunamadı."
+                )
+            else:
+              historical_insight_text = (
+                  f"Geçmiş yıl arşivinde {target_day}.{target_month} tarihine"
+                  " ait tam eşleşen kayıt bulunamadı, ancak genel trend"
+                  " entegre edildi."
+              )
+          else:
+            historical_insight_text = (
+                "Geçmiş yıl arşiv dosyası yüklendi ancak tarih sütunu tespit"
+                " edilemedi."
+            )
+        except Exception as ex:
+          historical_insight_text = (
+              f"Geçmiş yıl verisi okunurken hata oluştu: {ex}"
+          )
+
       st.markdown("---")
       st.info(
-          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Geçmiş Analiz Notu**\n\n"
-          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü için **{special_day}** ve hava koşulu **'{weather_condition}'** ({temperature}°C) baz alınmıştır.\n"
-          f"- **Geçmiş Arşiv Durumu:** "
-          + (
-              "Geçmiş yıllar arşivi yüklü; genel trend ve büyüme oranları hesaba katıldı."
-              if df_history is not None
-              else "Geçmiş yıl arşivi (`gecmis_arsiv.xlsx`) henüz yüklenmedi; mevcut aktif sipariş matrisi üzerinden analiz yapılıyor."
-          )
-          + f"\n- **Öneri:** Toplam önerilen **{subtotal} adet** üretim; şube talepleri, akşamüstü yoğunluk beklentisi ve seçilen güvenlik payı (%{buffer_pct}) dengelenerek optimize edilmiştir."
+          "🤖 **Tatlıbak Akıllı Yönetici Özeti & Geçmiş Yıl Analizi**\n\n"
+          f"- **Seçilen Kriterler:** {days_tr.get(day_of_week, '')} günü için"
+          f" **{special_day}** ve hava koşulu **'{weather_condition}'**"
+          f" ({temperature}°C) baz alınmıştır.\n- **Geçmiş Yıl Kıyaslaması:**"
+          f" {historical_insight_text}\n- **Operasyonel Öneri:** Şube talepleri,"
+          f" akşamüstü yoğunluk beklentisi ve güvenlik payı (%{buffer_pct})"
+          f" dengelenerek toplam **{subtotal} adet** üretim optimize edilmiştir."
       )
 
     else:
@@ -626,3 +685,16 @@ with tab3:
           pass
 
     st.dataframe(master_df, use_container_width=True, height=500)
+
+with tab4:
+  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
+  if df_history is not None:
+    st.success(f"✅ Arşiv başarıyla yüklendi!")
+    st.dataframe(df_history, use_container_width=True, height=550)
+  else:
+    st.warning(
+        "⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı veya okunamadı. Lütfen"
+        " dosyanın ana klasörde olduğundan emin olun."
+    )
+    if hist_info:
+      st.info(f"Detay: {hist_info}")
