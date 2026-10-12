@@ -350,4 +350,70 @@ with tab3:
           except:
             current_t_val = 20
 
-      col_e1, col_
+      col_e1, col_e2 = st.columns(2)
+      with col_e1:
+        edit_weather = st.selectbox(
+            "Hava Durumu Güncelle",
+            [
+                "Açık",
+                "Bulutlu",
+                "Hafif Çisenti",
+                "Hafif Yağmurlu",
+                "Çok Yağmurlu",
+                "Çok Bulutlu",
+            ],
+            index=0,
+            key="edit_w_sel",
+        )
+      with col_e2:
+        edit_temp = st.number_input(
+            "Sıcaklık (°C) Güncelle",
+            min_value=-10,
+            max_value=45,
+            value=current_t_val,
+            step=1,
+            key="edit_t_sel",
+        )
+
+      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
+      with st.form("edit_record_form"):
+        updated_qtys = {}
+        for _, row in day_records.iterrows():
+          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
+              f"{row['Pasta Çeşidi']}",
+              min_value=0,
+              max_value=500,
+              value=int(row["Gerçekleşen Sipariş"]),
+              step=1,
+          )
+        if st.form_submit_button("🔄 Güncelle"):
+          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
+          new_edit_rows = [
+              {
+                  "Tarih": dt_edit_obj,
+                  "Pasta Çeşidi": p,
+                  "Gerçekleşen Sipariş": q,
+              }
+              for p, q in updated_qtys.items()
+              if q > 0
+          ]
+          if new_edit_rows:
+            df_orders = pd.concat(
+                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
+            )
+            df_orders.to_csv(csv_archive_file, index=False)
+
+          if os.path.exists(csv_weather_file):
+            df_w_up = pd.read_csv(csv_weather_file)
+            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
+            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
+          else:
+            df_w_up = pd.DataFrame(
+                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
+            )
+          new_w_row = pd.DataFrame([{
+              "Tarih": dt_edit_obj,
+              "Hava Durumu": edit_weather,
+              "Sıcaklık (°C)": f"{edit_temp}°C",
+          }])
+          pd.concat([df_w_up, new_w_row], ignore_index=True).to_csv(
