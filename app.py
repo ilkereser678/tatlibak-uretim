@@ -416,4 +416,197 @@ with tab2:
         "SIFIR BOY PASTA MEYVELİ",
         "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
         "ORTA TURTA ÇİLEKLİ OREO PASTA",
-        "SI
+        "SIFIR TURTA ÇİLEKLİ OREO PASTA",
+    ]
+    excel_products = [
+        p
+        for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
+        if "TOPLAM" not in p.strip().upper()
+    ]
+    products_list = [p for p in desired_order if p in excel_products]
+    for p in excel_products:
+      if p not in products_list:
+        products_list.append(p)
+
+    order_date = st.date_input("Sipariş Tarihi Seçin", key="order_date_input")
+    st.markdown("---")
+    st.markdown("🌤️ **O Günün Hava & Çevre Koşulları**")
+    entry_weather = st.selectbox(
+        "Hava Durumu",
+        [
+            "Açık",
+            "Bulutlu",
+            "Hafif Çisenti",
+            "Hafif Yağmurlu",
+            "Çok Yağmurlu",
+            "Çok Bulutlu",
+        ],
+        key="entry_weather",
+    )
+    entry_temp = st.number_input(
+        "Sıcaklık (°C)", min_value=-10, max_value=45, value=20, step=1, key="entry_temp"
+    )
+
+    st.markdown("---")
+    with st.form("order_entry_form"):
+      entered_orders = {}
+      for idx, prod in enumerate(products_list):
+        entered_orders[prod] = st.number_input(
+            f"{prod}", min_value=0, max_value=500, value=0, step=1, key=f"ord_{idx}"
+        )
+
+      current_total = sum(entered_orders.values())
+      st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
+      submit_order = st.form_submit_button(
+          "💾 Gerçekleşen Siparişleri ve Hava Durumunu Kaydet"
+      )
+
+      if submit_order:
+        new_rows = []
+        str_date = order_date.strftime("%Y-%m-%d")
+        if not df_orders.empty:
+          df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
+
+        for prod, qty in entered_orders.items():
+          if qty > 0:
+            new_rows.append({
+                "Tarih": str_date,
+                "Pasta Çeşidi": prod,
+                "Gerçekleşen Sipariş": qty,
+            })
+
+        if new_rows:
+          new_df = pd.DataFrame(new_rows)
+          new_df["Tarih"] = pd.to_datetime(new_df["Tarih"])
+          df_orders = pd.concat([df_orders, new_df], ignore_index=True)
+          df_orders_save = df_orders.copy()
+          df_orders_save["Tarih"] = df_orders_save["Tarih"].dt.strftime(
+              "%Y-%m-%d"
+          )
+          df_orders_save.to_csv(csv_archive_file, index=False)
+
+          if not df_weather.empty:
+            df_weather = df_weather[
+                df_weather["Tarih"] != pd.to_datetime(str_date)
+            ]
+          new_weather_row = pd.DataFrame([{
+              "Tarih": pd.to_datetime(str_date),
+              "Hava Durumu": entry_weather,
+              "Sıcaklık (°C)": f"{entry_temp}°C",
+          }])
+          df_weather = pd.concat([df_weather, new_weather_row], ignore_index=True)
+          df_weather_save = df_weather.copy()
+          df_weather_save["Tarih"] = df_weather_save["Tarih"].dt.strftime(
+              "%Y-%m-%d"
+          )
+          df_weather_save.to_csv(csv_weather_file, index=False)
+          st.success("✅ Kayıt başarıyla tamamlandı!")
+          st.rerun()
+        else:
+          st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
+
+with tab3:
+  st.subheader("📂 Arşiv & Matris Tablo")
+  if not df_orders.empty:
+    st.markdown("---")
+    st.subheader("✏️ Geçmiş Gün Verisini Düzenle")
+    edit_date_list = sorted(
+        df_orders["Tarih"].dt.strftime("%d.%m.%Y").unique().tolist(), reverse=True
+    )
+    if edit_date_list:
+      selected_edit_date_str = st.selectbox(
+          "Düzenlenecek Tarihi Seçin", edit_date_list, key="edit_date_sel"
+      )
+      dt_edit_obj = pd.to_datetime(selected_edit_date_str, format="%d.%m.%Y")
+
+      current_w_val, current_t_val = "Açık", 20
+      if not df_weather.empty:
+        w_match = df_weather[df_weather["Tarih"] == dt_edit_obj]
+        if not w_match.empty:
+          current_w_val = w_match.iloc[0].get("Hava Durumu", "Açık")
+          try:
+            current_t_val = int(
+                str(w_match.iloc[0].get("Sıcaklık (°C)", "20"))
+                .replace("°C", "")
+                .strip()
+            )
+          except:
+            current_t_val = 20
+
+      weather_options = [
+          "Açık",
+          "Bulutlu",
+          "Hafif Çisenti",
+          "Hafif Yağmurlu",
+          "Çok Yağmurlu",
+          "Çok Bulutlu",
+      ]
+      default_w_idx = (
+          weather_options.index(current_w_val)
+          if current_w_val in weather_options
+          else 0
+      )
+
+      col_e1, col_e2 = st.columns(2)
+      with col_e1:
+        edit_weather = st.selectbox(
+            "Hava Durumu Güncelle",
+            weather_options,
+            index=default_w_idx,
+            key="edit_w_sel",
+        )
+      with col_e2:
+        edit_temp = st.number_input(
+            "Sıcaklık (°C) Güncelle",
+            min_value=-10,
+            max_value=45,
+            value=current_t_val,
+            step=1,
+            key="edit_t_sel",
+        )
+
+      day_records = df_orders[df_orders["Tarih"] == dt_edit_obj]
+      with st.form("edit_record_form"):
+        updated_qtys = {}
+        for _, row in day_records.iterrows():
+          updated_qtys[row["Pasta Çeşidi"]] = st.number_input(
+              f"{row['Pasta Çeşidi']}",
+              min_value=0,
+              max_value=500,
+              value=int(row["Gerçekleşen Sipariş"]),
+              step=1,
+          )
+        if st.form_submit_button("🔄 Güncelle"):
+          df_orders = df_orders[df_orders["Tarih"] != dt_edit_obj]
+          new_edit_rows = [
+              {
+                  "Tarih": dt_edit_obj,
+                  "Pasta Çeşidi": p,
+                  "Gerçekleşen Sipariş": q,
+              }
+              for p, q in updated_qtys.items()
+              if q > 0
+          ]
+          if new_edit_rows:
+            df_orders = pd.concat(
+                [df_orders, pd.DataFrame(new_edit_rows)], ignore_index=True
+            )
+            df_orders.to_csv(csv_archive_file, index=False)
+
+          if os.path.exists(csv_weather_file):
+            df_w_up = pd.read_csv(csv_weather_file)
+            df_w_up["Tarih"] = pd.to_datetime(df_w_up["Tarih"])
+            df_w_up = df_w_up[df_w_up["Tarih"] != dt_edit_obj]
+          else:
+            df_w_up = pd.DataFrame(
+                columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
+            )
+          new_w_row = pd.DataFrame([{
+              "Tarih": dt_edit_obj,
+              "Hava Durumu": edit_weather,
+              "Sıcaklık (°C)": f"{edit_temp}°C",
+          }])
+          updated_weather_df = pd.concat(
+              [df_w_up, new_w_row], ignore_index=True
+          )
+          updated_weather_df.to_csv(csv_weather_file, index=
