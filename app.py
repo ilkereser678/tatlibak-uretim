@@ -205,13 +205,20 @@ with tab1:
       elif "Hafta Sonu" in special_day:
         special_multiplier = 1.10
 
-      products = df_all.iloc[1:, 0].values
+      # Orijinal Excel'deki ürünleri alırken içindeki "TOPLAM" satırlarını ayıklayalım
+      raw_products = df_all.iloc[1:, 0].dropna().astype(str).values
+      valid_products = [
+          p for p in raw_products if "TOPLAM" not in p.strip().upper()
+      ]
+
       numeric_df = df_all.iloc[1:, 1:].apply(pd.to_numeric, errors="coerce")
+      # Toplam satırını hesaplamalardan hariç tutmak için filtrele
+      valid_numeric_df = numeric_df.iloc[: len(valid_products)]
 
       base_vals = (
-          numeric_df.mean(axis=1).fillna(0)
-          if not numeric_df.empty
-          else pd.Series([0] * len(products))
+          valid_numeric_df.mean(axis=1).fillna(0)
+          if not valid_numeric_df.empty
+          else pd.Series([0] * len(valid_products))
       )
 
       combined_multiplier = (
@@ -227,28 +234,29 @@ with tab1:
       )
 
       forecast_df = pd.DataFrame({
-          "Pasta Çeşidi": products,
+          "Pasta Çeşidi": valid_products,
           target_col_name: forecast_vals,
       })
-      forecast_df = forecast_df.dropna(subset=["Pasta Çeşidi"])
       forecast_df = forecast_df[
           ~forecast_df["Pasta Çeşidi"]
           .astype(str)
           .str.contains("BATON", na=False)
       ]
 
-      # Tabloya tam uyumlu olması için birebir yuvarlanmış değerlerin toplamı alınıyor
-      valid_rows_for_total = forecast_df[
-          ~forecast_df["Pasta Çeşidi"]
-          .astype(str)
-          .str.upper()
-          .str.contains("TOPLAM", na=False)
-      ]
-      total_forecast = int(valid_rows_for_total[target_col_name].sum())
+      # Gerçek hesaplanan toplam değer
+      subtotal = int(forecast_df[target_col_name].sum())
 
+      # Tablonun en altına tertemiz doğru toplam satırını ekleyelim
+      total_row_df = pd.DataFrame({
+          "Pasta Çeşidi": ["TOPLAM PASTA SAYISI"],
+          target_col_name: [subtotal],
+      })
+      forecast_df = pd.concat([forecast_df, total_row_df], ignore_index=True)
+
+      # Üstteki metrik ve tablodaki alt toplam şimdi %100 uyuşacak
       st.metric(
           label="Önerilen Toplam Pasta Üretimi",
-          value=f"{total_forecast} Adet",
+          value=f"{subtotal} Adet",
       )
       st.dataframe(forecast_df, use_container_width=True, height=450)
     else:
@@ -285,7 +293,11 @@ with tab2:
         "ORTA TURTA ÇİLEKLİ OREO PASTA",
         "SIFIR TURTA ÇİLEKLİ OREO PASTA",
     ]
-    excel_products = df_all.iloc[1:, 0].dropna().astype(str).tolist()
+    excel_products = [
+        p
+        for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
+        if "TOPLAM" not in p.strip().upper()
+    ]
     products_list = [p for p in desired_order if p in excel_products]
     for p in excel_products:
       if p not in products_list:
@@ -495,6 +507,13 @@ with tab3:
   if df_all is not None:
     master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
     product_col_name = master_df.columns[0]
+    # Orijinal Excel'deki toplam satırını matristen de temizleyelim
+    master_df = master_df[
+        ~master_df[product_col_name]
+        .astype(str)
+        .str.upper()
+        .str.contains("TOPLAM", na=False)
+    ]
 
     weather_dict = {}
     if not df_weather.empty:
@@ -553,22 +572,19 @@ with tab3:
         [pd.DataFrame([date_row_data]), master_df], ignore_index=True
     )
 
-    # Toplam satırını otomatik güncelleme
-    total_row_mask = (
-        master_df[product_col_name]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-        .str.contains("TOPLAM PASTA SAYISI", na=False)
-    )
+    # Toplam satırını dinamik olarak yeniden ekleyelim
+    total_row_data = {product_col_name: "TOPLAM PASTA SAYISI"}
+    for col in master_df.columns:
+      if col != product_col_name:
+        numeric_col = pd.to_numeric(master_df[col].iloc[1:], errors="coerce")
+        if not numeric_col.isna().all():
+          total_row_data[col] = int(numeric_col.sum())
+        else:
+          total_row_data[col] = 0
 
-    if total_row_mask.any():
-      products_only_df = master_df[~total_row_mask].iloc[1:]
-      for col in master_df.columns:
-        if col != product_col_name:
-          numeric_col = pd.to_numeric(products_only_df[col], errors="coerce")
-          if not numeric_col.isna().all():
-            master_df.loc[total_row_mask, col] = int(numeric_col.sum())
+    master_df = pd.concat(
+        [master_df, pd.DataFrame([total_row_data])], ignore_index=True
+    )
 
     # Sayısal sütunlardaki küsuratları kaldırma
     for col in master_df.columns:
