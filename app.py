@@ -1,7 +1,7 @@
 import datetime
 import json
 import os
-import google.generativeai as genai  # Kararlı resmi Google SDK
+import google.generativeai as genai
 from urllib.request import Request, urlopen
 import pandas as pd
 import streamlit as st
@@ -12,11 +12,9 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title(
-    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (Resmi SDK)"
-)
+st.title("🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru")
 
-# --- RESMİ GOOGLE SDK İLE API BAĞLANTISI ---
+# --- GEMINI API BAĞLANTISI ---
 api_key = None
 try:
   api_key = st.secrets.get("GEMINI_API_KEY")
@@ -30,19 +28,22 @@ if api_key:
   try:
     genai.configure(api_key=api_key)
   except Exception as e:
-    st.error(f"GenAI Yapılandırma Hatası: {e}")
+    st.error(f"API Yapılandırma Hatası: {e}")
 
 
 def call_gemini_muhakeme(prompt_text):
   if not api_key:
-    return "⚠️ Gemini API anahtarı (.streamlit/secrets.toml) bulunamadı veya yapılandırılamadı."
+    return (
+        "⚠️ Gemini API anahtarı (.streamlit/secrets.toml) bulunamadı. Lütfen"
+        " anahtarınızı kontrol edin."
+    )
   try:
-    # Kararlı ve güçlü Gemini 1.5 Flash modeliyle gerçek zamanlı akıllı muhakeme
+    # Gemini modeli ile gerçek zamanlı akıllı muhakeme ve analiz
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(prompt_text)
     return response.text
   except Exception as e:
-    return f"Gemini AI Muhakeme Hatası: {e}"
+    return f"Gemini API Muhakeme Hatası: {e}"
 
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
@@ -230,15 +231,13 @@ with tab1:
     buffer_pct = st.selectbox(
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    ai_hesapla_button = st.button(
-        "🧠 Gemini AI ile Arşiv Kıyaslamalı Muhakeme Başlat"
-    )
+    ai_hesapla_button = st.button("🧠 Gemini AI ile Canlı Muhakeme Başlat")
 
   with col2:
     if ai_hesapla_button:
       with st.spinner(
-          "🧠 Gemini AI geçmiş arşivleri, ekim döngülerini (8-13 Ekim"
-          " sarmallarını) ve şube momentumunu analiz ediyor..."
+          "🧠 Gemini AI geçmiş arşivleri, ekim döngülerini ve güncel sipariş"
+          " akışını bizzat analiz edip yorumluyor..."
       ):
         try:
           recent_orders_summary = (
@@ -255,9 +254,10 @@ with tab1:
               df_all.to_string() if df_all is not None else "Excel listesi yok."
           )
 
+          # Kapsamlı prompt ile tam muhakeme gücü doğrudan Gemini'ye devrediliyor
           prompt = f"""
                     Sen Tatlıbak pastacılık üretim planlama sisteminin kıdemli yapay zeka muhakeme ve denetim uzmanısın. 
-                    Asla ezbere, sabit veya statik rakamlar verme. Sistemdeki geçmiş verileri, ekim ayı döngülerini ve güncel sipariş momentumunu akıllıca harmanlayarak gerçek bir üretim yöneticisi gibi analiz yap.
+                    Asla ezbere, sabit veya statik rakamlar verme. Sistemdeki geçmiş arşiv verilerini, ekim ayı döngülerini (örneğin 8 Ekim 1317, 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim 1263 düşüş sarmallarını) ve güncel sipariş momentumunu akıllıca harmanlayarak gerçek bir üretim yöneticisi gibi derinlemesine analiz yap.
                     
                     HEDEF KRİTERLER:
                     - Üretim / Hedef Tarih: {selected_date.strftime('%d.%m.%Y')} ({turkish_day})
@@ -269,15 +269,15 @@ with tab1:
                     1. Son Girilen Gerçek Sipariş Arşivi:
                     {recent_orders_summary}
                     
-                    2. Geçmiş Yıllar Arşivi (Örn. Ekim Ayı Seyirleri - 8 Ekim 1317, 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim 1263 düşüş sarmalları):
+                    2. Geçmiş Yıllar Arşivi (Ekim Ayı Seyirleri ve Dalgalanmaları):
                     {history_summary}
                     
                     3. Ürün Çeşit Listesi:
                     {products_summary}
                     
                     YÖNETİCİYE SUNACAĞIN RAPOR FORMATI:
-                    1. 🔍 **Arşiv Muhakemesi & Trend Uyarısı:** Geçmiş yılların aynı dönemindeki (örneğin ekim ortası) sarmalları ve düşüş/çıkış eğrilerini bugünkü sipariş verileriyle kıyasla. Yöneticiyi olası risklere veya fırsatlara karşı net bir dille uyar.
-                    2. 📊 **Özet Durum & Strateji:** Şube kapasite bantlarını ve güvenli stok payını (%{buffer_pct}) dikkate alarak toplam üretim hedefinin neden bu seviyede belirlendiğini açıkla.
+                    1. 🔍 **Arşiv Muhakemesi & Trend Uyarısı:** Geçmiş yılların aynı dönemindeki (örneğin ekim ortası) sarmalları, hafta içi/hafta sonu geçişlerini ve düşüş/çıkış eğrilerini bugünkü sipariş verileriyle kıyasla. Yöneticiyi olası risklere veya fırsatlara karşı net ve uyarıcı bir dille uyar.
+                    2. 📊 **Stratejik Değerlendirme:** Şube kapasite bantlarını ve güvenli stok payını (%{buffer_pct}) dikkate alarak toplam üretim hedefinin neden bu seviyede belirlendiğini açıkla.
                     3. 📋 **Ürün Bazlı Üretim Dağılım Listesi:** Ürün çeşitlerine göre adil, dengeli ve gerçekçi üretim adetlerini tablo veya net liste halinde sun. En altta mutlaka **TOPLAM ÜRETİM HEDEFİ** rakamını belirt.
                     """
 
@@ -285,13 +285,11 @@ with tab1:
           st.markdown(ai_response_text)
 
         except Exception as ex:
-          st.error(
-              f"Gemini AI muhakeme motoru çalıştırılırken hata oluştu: {ex}"
-          )
+          st.error(f"Gemini AI muhakeme motoru çalıştırılırken hata: {ex}")
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Arşiv Kıyaslamalı"
-          " Muhakeme Başlat'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Canlı Muhakeme"
+          " Başlat'** butonuna tıklayın."
       )
 
 with tab2:
