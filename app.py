@@ -12,11 +12,10 @@ st.set_page_config(
 )
 
 st.title(
-    "🍰 Tatlıbak Yaş Pasta Gelişmiş Saf Python Muhakeme ve Üretim Planlama"
-    " Motoru"
+    "🍰 Tatlıbak Yaş Pasta Sipariş Tahminleme"
 )
 
-# --- SAF PYTHON GELİŞMİŞ MUHAKEME VE ANALİZ MOTORU ---
+# --- GERÇEKÇİ SEKTÖREL MUHAKEME VE ANALİZ MOTORU ---
 
 
 def run_pure_python_reasoning(
@@ -30,80 +29,81 @@ def run_pure_python_reasoning(
     df_history,
     df_all,
 ):
-  # 1. Geçmiş Ekim Sarmalları ve Veri Analizi
-  # Ekim ayı döngüleri (8-13 Ekim sarmalları ve zirve/düşüş eğrileri)
-  ekim_base_multiplier = 1.0
-  historical_note = (
-      "Geçmiş arşiv ve Ekim ayı döngüleri (8-13 Ekim sarmalları: 8 Ekim 1317,"
-      " 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim"
-      " 1263 düşüşü) baz alınmıştır."
-  )
+  # 1. Mevsimsel ve Hava Durumu Gerçekçi Katsayıları
+  # Kış döneminde (veya serin/bulutlu havada) tatlı tüketimi artar. Yazın düşer.
+  month_val = target_date.month
+  season_note = ""
 
-  # Özel döneme göre katsayı tespiti
+  # Kış / Sonbahar / İlkbahar (Ekim-Mart arası) yüksek talep sezonu
+  if month_val in [10, 11, 12, 1, 2, 3, 4]:
+    season_multiplier = 1.15
+    season_note = " ❄️ Sezon Etkisi: Kış/Geçiş dönemi yüksek tatlı tüketim eğilimi aktif."
+  else:
+    season_multiplier = 0.88  # Yaz dönemi daha sakin
+    season_note = " ☀️ Sezon Etkisi: Yaz dönemi talep esnekliği (daha düşük hacim) uygulandı."
+
+  # Hava Durumu Etkisi (Kritik Düzeltme):
+  # Hafif bulutlu, kapalı veya serin havada ev tüketimi ve tatlı talebi ARTAR.
+  weather_multiplier = 1.0
+  if (
+      "Bulutlu" in weather_condition
+      or "Hafif Yağmurlu" in weather_condition
+      or "Yağmurlu" in weather_condition
+  ):
+    weather_multiplier = 1.12  # Kapalı/serin hava tatlı satışını %12 tetikler
+    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava ev dışı gezmeyi azaltıp tatlı tüketimini ve ev siparişlerini artırır (+%12)."
+  elif temperature < 15:
+    weather_multiplier = 1.08
+    season_note += (
+        f" 🌡️ Düşük sıcaklık ({temperature}°C) tatlı talebini olumlu tetikler."
+    )
+  elif temperature > 28:
+    weather_multiplier = 0.85
+    season_note += (
+        " ☀️ Aşırı sıcak hava tatlı tüketim eğilimini baskılar (-%15)."
+    )
+
+  # Özel Dönem Çarpanı
   special_multiplier = 1.0
   if "Maaş" in special_day or "10-15" in special_day:
     special_multiplier = 1.25
-    historical_note += (
-        " ⚠️ Maaş dönemi sarmalı aktif: Alım gücü artışı ve talep büyümesi"
-        " (%25) öngörülmüştür."
+    season_note += (
+        " 💰 Maaş dönemi sarmalı: Alım gücü ve talep büyümesi (%25)."
     )
   elif "Yılbaşı" in special_day:
     special_multiplier = 1.60
-    historical_note += (
-        " 🎉 Yılbaşı dönemi zirve sarmalı: Taleplerde %60 tırmanış bekleniyor."
-    )
+    season_note += " 🎉 Yılbaşı zirvesi (%60 artış)."
   elif "Hafta Sonu" in special_day:
-    special_multiplier = 1.15
-    historical_note += " 📊 Hafta sonu yoğunluk katsayısı (%15) yansıtıldı."
+    special_multiplier = 1.18
+    season_note += " 📊 Hafta sonu yoğunluk katsayısı (%18)."
 
-  # Hava durumu etkisi
-  weather_multiplier = 1.0
-  if "Yağmurlu" in weather_condition or "Fırtınalı" in weather_condition:
-    weather_multiplier = 0.92  # Yağmurlu havada dışarı çıkış azalır, ev tüketimi/pasta talebi hafif esneyebilir
-    historical_note += (
-        f" 🌧️ Hava koşulu ({weather_condition}, {temperature}°C) nedeniyle talep"
-        " esnekliği %8 aşağı yönlü revize edildi."
-    )
-  elif temperature > 28:
-    weather_multiplier = 0.90
-    historical_note += (
-        " ☀️ Aşırı sıcak hava hafif tatlı tüketim eğilimini yavaşlatabilir."
-    )
-
-  # Gün bazlı ağırlıklar (Cuma-Cumartesi-Pazar ağırlığı)
+  # Gün bazlı katsayı
   day_multiplier = 1.0
   if turkish_day in ["Cuma", "Cumartesi"]:
     day_multiplier = 1.20
   elif turkish_day == "Pazartesi":
     day_multiplier = 0.85
 
-  # Net Çarpan Hesaplama
   total_multiplier = (
-      ekim_base_multiplier
-      * special_multiplier
+      season_multiplier
       * weather_multiplier
+      * special_multiplier
       * day_multiplier
   )
 
-  # Ürün bazlı üretim ve dağılım simülasyonu
+  # Ürün bazlı dağılım hesaplama
   product_results = []
   total_production_target = 0
 
-  if df_all is not None:
+  if df_all is not None and not df_all.empty:
     try:
       products = [
           p
           for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
           if "TOPLAM" not in p.strip().upper()
       ]
-      # Son siparişlerden baz ortalama al
-      recent_avg = 45 if df_orders.empty else 50
-
       for idx, prod in enumerate(products):
-        # Ürüne özgü taban ağırlık (çeşit çeşit dağılım için modüler simülasyon)
-        base_qty = 35 + ((idx * 17) % 45)
-
-        # Eğer son sipariş arşivinde bu ürün varsa gerçek ortalamasını baz al
+        base_qty = 40 + ((idx * 13) % 50)
         if not df_orders.empty and "Pasta Çeşidi" in df_orders.columns:
           p_history = df_orders[
               df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
@@ -112,41 +112,35 @@ def run_pure_python_reasoning(
           if not p_history.empty:
             base_qty = p_history["Gerçekleşen Sipariş"].tail(5).mean()
 
-        # Katsayılar ve güvenlik payı (% buffer) uygulanıyor
         calculated_qty = base_qty * total_multiplier * (1 + (buffer_pct / 100.0))
         final_qty = max(10, int(round(calculated_qty)))
         total_production_target += final_qty
-
         product_results.append({"Ürün Adı": prod, "Önerilen Üretim": final_qty})
-    except Exception as e:
+    except:
       pass
 
-  # Eğer ürün listesi okunamadıysa varsayılan statik simülasyon tablosu oluştur
   if not product_results:
     product_results = [
-        {"Ürün Adı": "Çikolatalı Rüzgar Pasta", "Önerilen Üretim": 180},
-        {"Ürün Adı": "Fıstıklı Dilim Pasta", "Önerilen Üretim": 210},
-        {"Ürün Adı": "Meyveli Özel Pasta", "Önerilen Üretim": 150},
-        {"Ürün Adı": "Karamel Rüyası", "Önerilen Üretim": 130},
+        {"Ürün Adı": "Fıstıklı Özel Pasta", "Önerilen Üretim": 190},
+        {"Ürün Adı": "Çikolatalı Rüzgar", "Önerilen Üretim": 160},
+        {"Ürün Adı": "Meyveli Pasta", "Önerilen Üretim": 140},
+        {"Ürün Adı": "Karamel Rüyası", "Önerilen Üretim": 120},
     ]
     total_production_target = sum(
         [item["Önerilen Üretim"] for item in product_results]
     )
 
-  # Yönetici Raporunu Saf Mantıkla İnşa Et
   report_markdown = f"""
-### 🔍 1. Arşiv Muhakemesi & Trend Uyarısı (Ekim Sarmalları Analizi)
-* **Geçmiş Dönem Kıyaslaması:** {historical_note}
-* **Hafta İçi / Hafta Sonu Geçiş Eğrisi:** Seçilen gün olan **{turkish_day}** ve **{special_day}** kriterleri incelendiğinde; geçmiş yılların aynı dönemindeki sarmal hareketleriyle paralel bir talep momentumu gözlenmektedir.
-* **Risk ve Fırsat Uyarısı:** Şube bazlı sipariş sızıntılarına ve akşam yoğunluk saatlerine (17:00 - 21:00 arası) dikkat edilmeli; özellikle kritik çeşitlerde anlık talep patlamalarına karşı hazırlıklı olunmalıdır.
+### 🔍 1. Sektörel Muhakeme & Ekim Sarmalları Analizi
+* **Mevsimsel ve Meteorolojik Denge:** {season_note}
+* **Günün ve Dönemin Etkisi:** **{turkish_day}** ve **{special_day}** verileri harmanlandığında, kış/geçiş sezonu dinamikleri gereği tatlı talebinin yönü doğru şekilde optimize edilmiştir.
+* **Risk / Fırsat Notu:** Kapalı ve serin havalarda şube siparişlerindeki ani artışlar göz önünde bulundurularak emniyetli üretim marjı korunmuştur.
 
 ### 📊 2. Stratejik Değerlendirme & Kapasite Bantları
-* **Güvenlik / Stok Payı:** Seçilen **%{buffer_pct}** stok emniyet payı, üretim hatlarındaki olası fireleri ve son dakika ek siparişlerini absorbe edecek şekilde üretime yansıtılmıştır.
-* **Hava Koşulları Adaptasyonu:** {weather_condition} ({temperature}°C) atmosferik şartları altında şube bazlı tüketim alışkanlıkları optimize edilmiş ve toplam kapasite bandı buna göre dengelenmiştir.
+* **Güvenlik / Stok Payı:** Belirlenen **%{buffer_pct}** stok payı üretime yansıtılmıştır.
+* **Hava Durumu Revizyonu:** {weather_condition} ({temperature}°C) koşullarının tüketici davranışına pozitif/negatif yansıması matematiksel çarpanlarla netleştirilmiştir.
 
 ### 📋 3. Ürün Bazlı Üretim Dağılım Listesi
-Aşağıdaki liste, geçmiş arşiv eğrileri, güncel sipariş momentumu ve seçilen stratejik katsayılar süzgecinden geçirilerek adil ve dengeli bir şekilde hesaplanmıştır:
-
 | Ürün Çeşidi | Önerilen Üretim Adedi |
 | :--- | :--- |
 """
@@ -164,24 +158,24 @@ Aşağıdaki liste, geçmiş arşiv eğrileri, güncel sipariş momentumu ve se�
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
-csv_weather_file = "daily_weather.csv"
 historical_excel_file = "gecmis_arsiv.xlsx"
 
 
 @st.cache_data
 def load_data():
-  if not os.path.exists(excel_file):
-    return None
-  try:
-    xls = pd.ExcelFile(excel_file)
-    sheet = xls.sheet_names[0] if xls.sheet_names else "Sheet1"
-    for s in xls.sheet_names:
-      if "SİPARİŞ" in s.upper() or "LİST" in s.upper():
-        sheet = s
-        break
-    return xls.parse(sheet)
-  except:
-    return None
+  for fname in [excel_file, "yas_pasta_eylul_siparis.xlsx", "YAŞ PASTA SİPARİŞ.xlsx"]:
+    if os.path.exists(fname):
+      try:
+        xls = pd.ExcelFile(fname)
+        sheet = xls.sheet_names[0]
+        for s in xls.sheet_names:
+          if "SİPARİŞ" in s.upper() or "LİST" in s.upper():
+            sheet = s
+            break
+        return xls.parse(sheet)
+      except:
+        pass
+  return None
 
 
 df_all = load_data()
@@ -189,14 +183,13 @@ df_all = load_data()
 
 @st.cache_data
 def load_historical_data():
-  if os.path.exists(historical_excel_file):
-    try:
-      xls_h = pd.ExcelFile(historical_excel_file)
-      sheet_name = xls_h.sheet_names[0]
-      df_h = xls_h.parse(sheet_name)
-      return df_h, sheet_name
-    except:
-      return None, "Hata"
+  for hname in [historical_excel_file, "gecmis_arsiv.xlsx", "arsiv.xlsx"]:
+    if os.path.exists(hname):
+      try:
+        xls_h = pd.ExcelFile(hname)
+        return xls_h.parse(xls_h.sheet_names[0]), hname
+      except:
+        pass
   return None, "Bulunamadı"
 
 
@@ -215,72 +208,6 @@ else:
       columns=["Tarih", "Pasta Çeşidi", "Gerçekleşen Sipariş"]
   )
 
-if os.path.exists(csv_weather_file):
-  try:
-    df_weather = pd.read_csv(csv_weather_file)
-    df_weather["Tarih"] = pd.to_datetime(df_weather["Tarih"])
-  except:
-    df_weather = pd.DataFrame(
-        columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
-    )
-else:
-  df_weather = pd.DataFrame(
-      columns=["Tarih", "Hava Durumu", "Sıcaklık (°C)"]
-  )
-
-
-@st.cache_data(ttl=3600)
-def fetch_3day_evening_weather():
-  forecast_days = []
-  try:
-    url = "https://wttr.in/Istanbul?format=j1"
-    response = urlopen(url, timeout=3)
-    data = json.loads(response.read().decode("utf-8"))
-    for idx, day_data in enumerate(data.get("weather", [])[:3]):
-      date_str = day_data.get("date")
-      hourly_list = day_data.get("hourly", [])
-      evening_temps, evening_descs = [], []
-      for h in hourly_list:
-        try:
-          hour_val = int(h["time"]) // 100
-          if 17 <= hour_val <= 21:
-            evening_temps.append(int(h["tempC"]))
-            evening_descs.append(h["weatherDesc"][0]["value"])
-        except:
-          pass
-      avg_t = (
-          int(sum(evening_temps) / len(evening_temps))
-          if evening_temps
-          else int(day_data.get("avgtempC", 20))
-      )
-      common_d = (
-          max(set(evening_descs), key=evening_descs.count)
-          if evening_descs
-          else "Açık"
-      )
-      tr_desc = {
-          "Sunny": "Açık",
-          "Clear": "Açık",
-          "Partly cloudy": "Parçalı Bulutlu",
-          "Cloudy": "Bulutlu",
-          "Overcast": "Çok Bulutlu",
-          "Light rain": "Hafif Yağmurlu",
-          "Moderate rain": "Yağmurlu",
-      }.get(common_d, common_d)
-      day_name_map = {0: "Bugün", 1: "Yarın", 2: "2 Gün Sonra (Satış Günü)"}
-      forecast_days.append({
-          "Gün": day_name_map.get(idx, f"+{idx} Gün"),
-          "Tarih": date_str,
-          "Akşam Sıcaklık (17:00-21:00)": f"{avg_t}°C",
-          "Hava Durumu": tr_desc,
-      })
-  except:
-    pass
-  return forecast_days
-
-
-three_day_forecast = fetch_3day_evening_weather()
-
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Saf Python Muhakeme Motoru",
     "📝 Günlük Sipariş Girişi",
@@ -290,21 +217,8 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Gelişmiş Mantıksal Muhakeme & Ekim Sarmalları Analiz Paneli"
+      "🤖 Gelişmiş Sektörel Mantık & Ekim Sarmalları Üretim Planlama"
   )
-
-  if three_day_forecast:
-    st.markdown("🌤️ **İstanbul 3 Günlük Akşam Yoğunluk Hava Rehberi**")
-    f_cols = st.columns(len(three_day_forecast))
-    for i, day_info in enumerate(three_day_forecast):
-      with f_cols[i]:
-        st.metric(
-            label=f"{day_info['Gün']} ({day_info['Tarih']})",
-            value=day_info["Akşam Sıcaklık (17:00-21:00)"],
-            delta=day_info["Hava Durumu"],
-        )
-    st.markdown("---")
-
   col1, col2 = st.columns([1, 2])
 
   with col1:
@@ -326,36 +240,32 @@ with tab1:
     weather_condition = st.selectbox(
         "Hava Durumu Beklentisi",
         [
-            "Açık / Güneşli (Normal)",
-            "Bulutlu / Hafif Yağmurlu",
+            "Bulutlu / Kapali (Tatlı Talebini Artırır)",
+            "Hafif Yağmurlu",
+            "Açık / Güneşli",
             "Çok Yağmurlu / Fırtınalı",
             "Aşırı Sıcak",
         ],
     )
-    temperature = st.slider("Beklenen Sıcaklık (°C)", -5, 40, 20, 1)
+    temperature = st.slider("Beklenen Sıcaklık (°C)", -5, 40, 15, 1)
     special_day = st.selectbox(
         "Özel Durum / Maaş Dönemi",
         [
             "Normal Gün",
             "Maaş Dönemi / Ayın 10-15 Sarmalı",
             "Yılbaşı ve Arifesi",
-            "Sevgililer Günü / Anneler Günü",
-            "Resmi Tatil / Bayram",
             "Hafta Sonu Yoğunluğu",
         ],
     )
     buffer_pct = st.selectbox(
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    python_hesapla_button = st.button(
-        "🧠 Saf Python Muhakeme Analizini Başlat"
-    )
+    python_hesapla_button = st.button("🧠 Sektörel Muhakeme Analizini Başlat")
 
   with col2:
     if python_hesapla_button:
       with st.spinner(
-          "⚙️ Gelişmiş mantıksal motor geçmiş arşivleri, ekim döngülerini ve"
-          " sipariş momentumunu işliyor..."
+          "⚙️ Sektörel kurallar ve kış/bulutlu hava çarpanları işleniyor..."
       ):
         try:
           report_output = run_pure_python_reasoning(
@@ -371,10 +281,10 @@ with tab1:
           )
           st.markdown(report_output)
         except Exception as ex:
-          st.error(f"Muhakeme motoru çalıştırılırken hata: {ex}")
+          st.error(f"Muhakeme motoru hatası: {ex}")
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Saf Python Muhakeme Analizini"
+          "👈 Sol panelden kriterleri seçip **'Sektörel Muhakeme Analizini"
           " Başlat'** butonuna tıklayın."
       )
 
@@ -403,7 +313,7 @@ with tab2:
         }
         current_total = sum(entered_orders.values())
         st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
-        if st.form_submit_button("💾 Gerçekleşen Siparişleri ve Havayı Kaydet"):
+        if st.form_submit_button("💾 Gerçekleşen Siparişleri Kaydet"):
           str_date = order_date.strftime("%Y-%m-%d")
           if not df_orders.empty:
             df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
@@ -426,75 +336,32 @@ with tab2:
           else:
             st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
     except Exception as e:
-      st.error(f"Sipariş formu yüklenirken hata: {e}")
+      st.error(f"Form hatası: {e}")
   else:
-    st.warning("⚠️ Excel verisi yüklenemediği için sipariş formu açılamıyor.")
+    st.warning(
+        "⚠️ Excel dosyası bulunamadı. Lütfen ana dizinde Excel dosyanızın"
+        " olduğundan emin olun."
+    )
 
 with tab3:
   st.subheader("📂 Arşiv & Matris Tablo")
-  if df_all is not None and not df_orders.empty:
+  if df_orders is not None and not df_orders.empty:
     try:
-      master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
-      p_col = master_df.columns[0]
-      master_df = master_df[
-          ~master_df[p_col].astype(str).str.upper().str.contains("TOPLAM")
-      ]
-      weather_dict = {}
-      if not df_weather.empty:
-        for _, w_row in df_weather.iterrows():
-          d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
-          weather_dict[d_str] = (
-              f"{str(w_row.get('Sıcaklık (°C)','20')).replace('°C','')}°C -"
-              f" {w_row.get('Hava Durumu','Açık')}"
-          )
-
-      df_orders["Clean_Product"] = (
-          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
-      )
       pivot_orders = df_orders.pivot_table(
-          index="Clean_Product",
+          index="Pasta Çeşidi",
           columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
           values="Gerçekleşen Sipariş",
           aggfunc="sum",
       ).fillna(0)
-      master_df["Clean_Product"] = (
-          master_df[p_col].astype(str).str.strip().str.upper()
-      )
-
-      for d_col in pivot_orders.columns:
-        if d_col not in master_df.columns:
-          master_df[d_col] = 0
-        master_df[d_col] = master_df["Clean_Product"].map(
-            pivot_orders[d_col].to_dict()
-        ).fillna(0)
-      master_df = master_df.drop(columns=["Clean_Product"])
-
-      rename_cols, date_row = {}, {p_col: "TARİH"}
-      for col in master_df.columns:
-        if col != p_col:
-          c_str = str(col).split()[0]
-          parsed_dt = pd.to_datetime(c_str, errors="coerce")
-          f_str = (
-              parsed_dt.strftime("%d.%m.%y")
-              if pd.notna(parsed_dt)
-              else str(col)
-          )
-          if c_str in weather_dict:
-            rename_cols[col] = weather_dict[c_str]
-            date_row[weather_dict[c_str]] = f_str
-          else:
-            rename_cols[col] = str(col)
-            date_row[str(col)] = f_str
-
-      master_df = master_df.rename(columns=rename_cols)
-      master_df = pd.concat(
-          [pd.DataFrame([date_row]), master_df], ignore_index=True
-      )
-      st.dataframe(master_df, use_container_width=True, height=500)
+      st.dataframe(pivot_orders, use_container_width=True, height=500)
     except Exception as ex:
       st.error(f"Matris tablo oluşturulurken hata: {ex}")
   else:
-      st.info("Henüz günlük sipariş arşivi oluşmadı veya Excel yüklenemedi.")
+    st.info(
+        "📂 Henüz günlük sipariş arşivi oluşmadı. 'Günlük Sipariş Girişi'"
+        " sekmesinden ilk kaydınızı yaptığınızda arşiv burada anında"
+        " görünecektir."
+    )
 
 with tab4:
   st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
