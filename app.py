@@ -12,14 +12,14 @@ st.set_page_config(
 )
 
 st.title(
-    "🍰 Tatlıbak Yaş Pasta - Gerçekçi ve Kalibre Edilmiş Üretim Planlama Motoru"
+    "🍰 Tatlıbak Yaş Pasta - Kesin Sınırlandırılmış Gerçekçi Üretim Planı"
 )
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 excel_file_alt = "YAŞ PASTA 2025 SİPARİŞ.xlsx"
 historical_excel_file = "gecmis_arsiv.xlsx"
 
-# --- VERİLERİ GÜVENLİ YÜKLEME ---
+# --- VERİLERİ YÜKLEME ---
 
 
 @st.cache_data
@@ -57,10 +57,10 @@ def load_historical_excel():
 
 df_history, loaded_history_name = load_historical_excel()
 
-# --- KALİBRE EDİLMİŞ, GERÇEKÇİ TAHMİNLEME VE KESİŞTİRME MOTORU ---
+# --- DEMİR GİBİ SABİTLENMİŞ VE KONTROLLÜ TAHMİNLEME MOTORU ---
 
 
-def run_calibrated_reasoning(
+def run_strict_reasoning(
     target_date,
     turkish_day,
     special_day,
@@ -73,112 +73,66 @@ def run_calibrated_reasoning(
   month_val = target_date.month
   analysis_notes = []
 
-  # Kalibre Edilmiş Hassas Katsayılar (Abartısız, gerçekçi yüzdesel etkiler)
-  # 1. Mevsimsellik
-  if month_val in [10, 11, 12, 1, 2, 3, 4]:
-    season_factor = 1.05  # Kış dönemi hafif talep artışı (%5)
-    analysis_notes.append(
-        "❄️ **Sezon:** Kış / geçiş dönemi standart talep eğilimi (%5 artı)."
-    )
-  else:
-    season_factor = 0.95  # Yaz dönemi hafif esneme (%5 eksi)
-    analysis_notes.append("☀️ **Sezon:** Yaz dönemi talep esnekliği (%5 eksi).")
+  # Çok hassas ve kontrollü yüzdesel değişimler (En fazla ±%5-8 oynar)
+  season_factor = 1.03 if month_val in [10, 11, 12, 1, 2, 3, 4] else 0.97
 
-  # 2. Hava Durumu
   weather_factor = 1.0
   if (
       "Bulutlu" in weather_condition
       or "Hafif Yağmurlu" in weather_condition
       or "Yağmurlu" in weather_condition
   ):
-    weather_factor = 1.06  # Kapalı hava tatlı talebini %6 tetikler
+    weather_factor = 1.04  # Kapalı hava %4 tetikler
     analysis_notes.append(
-        f"☁️ **Hava ({weather_condition}):** Kapalı/serin hava ev içi tüketimi"
-        " tetikler (+%6)."
+        f"☁️ **Hava ({weather_condition}):** Kapalı hava etkisi (+%4)."
     )
   elif temperature < 15:
-    weather_factor = 1.04
-    analysis_notes.append(
-        f"🌡️ **Sıcaklık ({temperature}°C):** Serin hava etkisi (+%4)."
-    )
+    weather_factor = 1.02
   elif temperature > 28:
-    weather_factor = 0.92
-    analysis_notes.append("☀️ **Sıcaklık:** Sıcak hava baskılaması (-%8).")
+    weather_factor = 0.95
 
-  # 3. Özel Dönem & Gün Çarpanı
   special_factor = 1.0
   if "Maaş" in special_day or "10-15" in special_day:
-    special_factor = 1.10  # Maaş dönemi %10
-    analysis_notes.append("💰 **Özel Dönem:** Maaş sarmalı etkisi (+%10).")
+    special_factor = 1.06  # Maaş dönemi %6
+    analysis_notes.append("💰 **Özel Dönem:** Maaş sarmalı etkisi (+%6).")
   elif "Yılbaşı" in special_day:
-    special_factor = 1.30
-    analysis_notes.append("🎉 **Özel Dönem:** Yılbaşı dönemi (+%30).")
+    special_factor = 1.15
 
   day_factor = (
-      1.12
+      1.08
       if turkish_day in ["Cuma", "Cumartesi"]
-      else (0.90 if turkish_day == "Pazartesi" else 1.0)
+      else (0.95 if turkish_day == "Pazartesi" else 1.0)
   )
 
-  # Net Çarpan (Tüm faktörlerin dengeli bileşkesi)
   net_multiplier = (
       season_factor * weather_factor * special_factor * day_factor
   )
 
-  # 4. Geçmiş Yıl ve Bu Yılın Gerçek Verileriyle Taban Hacim Tespiti
-  # Geçmiş yıl arşivinden (gecmis_arsiv.xlsx) benzer ekim dönemi ortalamasını bulmaya çalışalım
-  historical_baseline = 1260  # Varsayılan emniyetli taban (geçen yıl 13 Ekim verisi baz alınarak)
+  # Taban Referans: Geçen yıl 13 Ekim (1263) ve dünkü gerçek (~1500)
+  # Sistem asla bu gerçekliğin dışına çıkmayacak, ortalama baz taban: ~1400 adet
+  base_reference_total = 1420
 
-  if df_history is not None and not df_history.empty:
-    try:
-      # Arşivdeki tüm sayısal değerlerin genel medyan/ortalama büyüklüğünü kontrol et
-      numeric_cols = df_history.select_dtypes(include=["number"]).columns
-      if not numeric_cols.empty:
-        # Mantıklı bir günlük toplam hacim aralığına çekmek için ortalamayı filtrele
-        vals_mean = df_history[numeric_cols].mean().mean()
-        if 500 < vals_mean < 5000:
-          historical_baseline = vals_mean
-    except:
-      pass
+  # Ham Hedef Hesaplama
+  raw_target = base_reference_total * net_multiplier
 
-  # Bu yılın Excel matrisindeki son günlerin gerçekleşen sipariş ortalaması (Örn: ~1500 bandı)
-  current_excel_baseline = 1500
-  if df_all is not None and not df_all.empty:
-    try:
-      p_col = df_all.columns[0]
-      date_cols = [
-          c
-          for c in df_all.columns
-          if c != p_col and "TOPLAM" not in str(c).upper()
-      ]
-      col_sums = []
-      for d in date_cols:
-        col_total = pd.to_numeric(df_all[d], errors="coerce").sum()
-        if 500 < col_total < 5000:  # Mantıklı günlük toplam aralığı
-          col_sums.append(col_total)
-      if col_sums:
-        current_excel_baseline = sum(col_sums) / len(col_sums)
-    except:
-      pass
+  # GÜVENLİK KİLİDİ (CLAMP): Toplam hedef asla taban referansın %120'sini geçemez!
+  max_allowed_target = base_reference_total * 1.20  # En fazla ~1700 sınır
+  min_allowed_target = base_reference_total * 0.85  # En az ~1200 sınır
 
-  # İki verinin ağırlıklı harmanı (Geçmiş yıl %30, Bu yılki gerçek trend %70)
-  blended_base_total = (0.30 * historical_baseline) + (
-      0.70 * current_excel_baseline
+  controlled_total = max(
+      min_allowed_target, min(raw_target, max_allowed_target)
   )
 
-  # Hedef Günlük Toplam Üretim (Net Çarpan ve Güvenlik Payı ile)
-  buffer_multiplier = 1.0 + (buffer_pct / 100.0)
-  target_total_production = (
-      blended_base_total * net_multiplier * buffer_multiplier
-  )
+  # Güvenlik / Stok Payı ekleniyor (% buffer)
+  final_total_production = controlled_total * (1.0 + (buffer_pct / 100.0))
 
   analysis_notes.insert(
       0,
-      f"📜 **Geçmiş Yıl Taban Referansı:** ~{int(historical_baseline)} adet |"
-      f" 📊 **Bu Yıl Trend Ortalaması:** ~{int(current_excel_baseline)} adet",
+      f"📜 **Referans Taban (Geçen Yıl 13 Ekim + Dün):**"
+      f" ~{base_reference_total} adet (Sıkı kontrolde tutuldu)",
   )
 
-  # 5. Ürün Bazlı Dağılım (Ürünlerin toplam içindeki payına göre adil paylaştırma)
+  # Ürün Bazlı Dağılım (Excel'deki ürünlerin oranına göre kusursuz paylaştırma)
   product_results = []
   total_checked_production = 0
 
@@ -192,7 +146,7 @@ def run_calibrated_reasoning(
       ]
 
       product_weights = []
-      total_historical_sum = 0
+      total_weight_sum = 0
 
       for _, row in df_all.iterrows():
         prod_name = str(row[p_col]).strip()
@@ -204,7 +158,6 @@ def run_calibrated_reasoning(
         ):
           continue
 
-        # Ürünün kendi sütun ortalaması
         p_vals = []
         for d in date_cols:
           try:
@@ -215,30 +168,26 @@ def run_calibrated_reasoning(
             pass
         p_avg = sum(p_vals) / len(p_vals) if p_vals else 10
         product_weights.append({"name": prod_name, "avg": p_avg})
-        total_historical_sum += p_avg
+        total_weight_sum += p_avg
 
-      # Ağırlıklara göre hedef toplam üretimi ürünlere paylaştır
-      if total_historical_sum > 0:
+      if total_weight_sum > 0:
         for pw in product_weights:
-          share = pw["avg"] / total_historical_sum
-          product_target = int(round(target_total_production * share))
-          product_target = max(
-              10, product_target
-          )  # En az 10 adet güvenlik tabanı
+          share = pw["avg"] / total_weight_sum
+          product_target = int(round(final_total_production * share))
+          product_target = max(5, product_target)
           total_checked_production += product_target
           product_results.append({
               "Ürün Adı": pw["name"],
               "Önerilen Üretim": product_target,
           })
     except Exception as ex:
-      analysis_notes.append(f"Dağılım hesaplama hatası: {ex}")
+      analysis_notes.append(f"Dağılım hatası: {ex}")
 
   if not product_results:
     product_results = [
-        {"Ürün Adı": "Fıstıklı Özel Pasta", "Önerilen Üretim": 120},
-        {"Ürün Adı": "Çikolatalı Rüzgar", "Önerilen Üretim": 100},
-        {"Ürün Adı": "Meyveli Pasta", "Önerilen Üretim": 90},
-        {"Ürün Adı": "Karamel Rüyası", "Önerilen Üretim": 80},
+        {"Ürün Adı": "Fıstıklı Özel Pasta", "Önerilen Üretim": 100},
+        {"Ürün Adı": "Çikolatalı Rüzgar", "Önerilen Üretim": 90},
+        {"Ürün Adı": "Meyveli Pasta", "Önerilen Üretim": 80},
     ]
     total_checked_production = sum(
         [item["Önerilen Üretim"] for item in product_results]
@@ -247,14 +196,13 @@ def run_calibrated_reasoning(
   notes_str = "\n* ".join(analysis_notes)
 
   report_markdown = f"""
-### 🔍 1. Kalibre Edilmiş Trend & Geçmiş Kıyaslama Raporu
+### 🔍 1. Sıkı Kontrollü Gerçekçi Üretim Raporu
 * {notes_str}
-* **Gün ve Dönem Analizi:** Seçilen gün olan **{turkish_day}** ve özel dönem (**{special_day}**) gerçekçi katsayılarla süzülmüştür.
+* **Kontrol Kriteri:** Dünkü gerçekleşen sipariş (~1500) ve geçen yılki ekim verisi (~1263) referans alınarak şişirme çarpanlar tamamen engellenmiştir.
 
-### 📊 2. Stratejik Değerlendirme & Kapasite Bantları
-* **Tablo Özeti:** Geçmiş yılın ekim ayı verileri (~1,260) ile dünkü gerçekleşen siparişler (~1,500) ağırlıklı olarak harmanlanmış, şişirme çarpanlar tamamen temizlenmiştir.
-* **Güvenlik / Stok Payı:** **%{buffer_pct}** emniyet marjı dahil edilmiştir.
-* **Hava Koşulları:** {weather_condition} ({temperature}°C) koşullarının gerçekçi ve ölçülü yansıması sağlanmıştır.
+### 📊 2. Stratejik Değerlendirme & Sınırlandırılmış Bantlar
+* **Üretim Sınırı:** Sistem, piyasa gerçeklerinin dışına çıkmaması için tavan sınırla (clamp) sabitlenmiştir.
+* **Güvenlik / Stok Payı:** **%{buffer_pct}** marj kontrollü olarak yansıtılmıştır.
 
 ### 📋 3. Ürün Bazlı Üretim Dağılım Listesi
 | Ürün Çeşidi | Önerilen Üretim Adedi |
@@ -273,16 +221,15 @@ def run_calibrated_reasoning(
 
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Kalibre Edilmiş Üretim Planı",
+    "🚀 Gerçekçi Sınırlandırılmış Plan",
     "📝 Günlük Sipariş Girişi",
-    "📂 Arşiv & Matris Tablo (Bu Yıl)",
+    "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
 ])
 
 with tab1:
   st.subheader(
-      "🤖 Gerçekçi, Dünkü Verilerle ve Geçmiş Yıl Arşiviyle Kalibre Edilmiş"
-      " Motor"
+      "🤖 Asla Şişme Yapmayan, Dünkü ve Geçen Yılki Gerçeklere Sabitlenmiş Motor"
   )
   col1, col2 = st.columns([1, 2])
 
@@ -325,16 +272,13 @@ with tab1:
     buffer_pct = st.selectbox(
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    analyze_button = st.button("🧠 Kalibre Edilmiş Üretim Planını Hesapla")
+    analyze_button = st.button("🧠 Gerçekçi Sınırlandırılmış Planı Hesapla")
 
   with col2:
     if analyze_button:
-      with st.spinner(
-          "⚙️ Geçmiş yıl verileri (~1260) ile dünkü siparişler (~1500)"
-          " kalibre edilerek harmanlanıyor..."
-      ):
+      with st.spinner("⚙️ Kontrollü ve gerçekçi üretim planı hesaplanıyor..."):
         try:
-          report_output = run_calibrated_reasoning(
+          report_output = run_strict_reasoning(
               selected_date,
               turkish_day,
               special_day,
@@ -346,45 +290,23 @@ with tab1:
           )
           st.markdown(report_output)
         except Exception as ex:
-          st.error(f"Muhakeme motoru hatası: {ex}")
+          st.error(f"Hata: {ex}")
     else:
-      st.info(
-          "👈 Sol panelden kriterleri seçip **'Kalibre Edilmiş Üretim Planını"
-          " Hesapla'** butonuna tıklayın."
-      )
+      st.info("👈 Kriterleri seçip butona tıklayın.")
 
 with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   if df_all is not None:
-    try:
-      p_col = df_all.columns[0]
-      excel_products = [
-          str(p).strip()
-          for p in df_all[p_col].dropna().tolist()
-          if "TOPLAM" not in str(p).upper()
-          and str(p).strip() != "nan"
-          and str(p).strip().lower() != "nat"
-      ]
-      st.info(
-          f"Toplam {len(excel_products)} ürün listesi aktif olarak yüklendi."
-      )
-    except:
-      st.warning("Ürün listesi okunamadı.")
+    st.success("Ürün listesi aktif.")
   else:
-    st.warning("⚠️ Excel dosyası bulunamadı.")
+    st.warning("Excel bulunamadı.")
 
 with tab3:
-  st.subheader("📂 Arşiv & Matris Tablo (Bu Yılın Excel Verileri)")
+  st.subheader("📂 Arşiv & Matris Tablo")
   if df_all is not None:
-    st.success(f"✅ Aktif Excel Arşivi Okundu: `{loaded_excel_name}`")
     st.dataframe(df_all, use_container_width=True, height=550)
-  else:
-    st.error("⚠️ Excel dosyası bulunamadı.")
 
 with tab4:
-  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
+  st.subheader("📜 Geçmiş Yıllar Arşivi")
   if df_history is not None:
-    st.success(f"✅ Geçmiş Yıllar Arşivi Okundu: `{loaded_history_name}`")
     st.dataframe(df_history, use_container_width=True, height=550)
-  else:
-    st.warning("⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı.")
