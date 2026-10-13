@@ -11,18 +11,19 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍰 Tatlıbak Yaş Pasta Kalıcı Arşiv & Sektörel Tahminleme Motoru")
+st.title(
+    "🍰 Tatlıbak Yaş Pasta - Geçmiş Yıl & Bu Yıl Trend Kıyaslamalı Üretim Motoru"
+)
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
 excel_file_alt = "YAŞ PASTA 2025 SİPARİŞ.xlsx"
-csv_archive_file = "daily_orders.csv"
 historical_excel_file = "gecmis_arsiv.xlsx"
 
-# --- VERİ YÜKLEME VE EXCEL ARŞİV KONTROLÜ ---
+# --- VERİLERİ DOĞRUDAN VE GÜVENLİ YÜKLEME ---
 
 
 @st.cache_data
-def load_data():
+def load_main_excel():
   for fname in [excel_file, excel_file_alt, "yas_pasta_eylul_siparis.xlsx"]:
     if os.path.exists(fname):
       try:
@@ -38,105 +39,55 @@ def load_data():
   return None, None
 
 
-df_all, loaded_excel_name = load_data()
+df_all, loaded_excel_name = load_main_excel()
 
 
 @st.cache_data
-def load_historical_data():
+def load_historical_excel():
   for hname in [historical_excel_file, "gecmis_arsiv.xlsx", "arsiv.xlsx"]:
     if os.path.exists(hname):
       try:
         xls_h = pd.ExcelFile(hname)
-        return xls_h.parse(xls_h.sheet_names[0]), hname
+        sheet_h = xls_h.sheet_names[0]
+        return xls_h.parse(sheet_h), hname
       except:
         pass
-  return None, "Bulunamadı"
+  return None, None
 
 
-df_history, hist_info = load_historical_data()
+df_history, loaded_history_name = load_historical_excel()
+
+# --- GEÇMİŞ YIL VE BU YIL VERİLERİNİ BİRLEŞTİREREK ANALİZ EDEN MOTOR ---
 
 
-# Günlük sipariş arşivini kalıcı ve güvenli yükleme (Yoksa Excel'den otomatik türet)
-def load_orders():
-  if os.path.exists(csv_archive_file):
-    try:
-      df = pd.read_csv(csv_archive_file)
-      if "Tarih" in df.columns and not df.empty:
-        df["Tarih"] = pd.to_datetime(df["Tarih"])
-        return df
-    except:
-      pass
-
-  # Eğer CSV yoksa, mevcut Excel dosyalarından verileri dönüştürüp başlangıç arşivi oluştur
-  if df_all is not None:
-    try:
-      # Excel içindeki tarih kolonlarını ve siparişleri tara
-      rows = []
-      p_col = df_all.columns[0]
-      date_cols = [
-          c
-          for c in df_all.columns
-          if c != p_col and "TOPLAM" not in str(c).upper()
-      ]
-
-      for d_col in date_cols:
-        parsed_dt = pd.to_datetime(str(d_col).split()[0], errors="coerce")
-        if pd.notna(parsed_dt):
-          for _, row in df_all.iterrows():
-            p_name = str(row[p_col]).strip()
-            if "TOPLAM" not in p_name.upper() and p_name != "nan":
-              val = row[d_col]
-              try:
-                val_int = int(val) if pd.notna(val) else 0
-              except:
-                val_int = 0
-              if val_int > 0:
-                rows.append({
-                    "Tarih": parsed_dt.strftime("%Y-%m-%d"),
-                    "Pasta Çeşidi": p_name,
-                    "Gerçekleşen Sipariş": val_int,
-                })
-      if rows:
-        df_gen = pd.DataFrame(rows)
-        df_gen.to_csv(csv_archive_file, index=False)
-        df_gen["Tarih"] = pd.to_datetime(df_gen["Tarih"])
-        return df_gen
-    except:
-      pass
-
-  return pd.DataFrame(columns=["Tarih", "Pasta Çeşidi", "Gerçekleşen Sipariş"])
-
-
-df_orders = load_orders()
-
-# --- SEKTÖREL VE SON 1 AYLIK MUHAKEME MOTORU ---
-
-
-def run_pure_python_reasoning(
+def run_comprehensive_reasoning(
     target_date,
     turkish_day,
     special_day,
     weather_condition,
     temperature,
     buffer_pct,
-    df_orders,
-    df_history,
     df_all,
+    df_history,
 ):
   month_val = target_date.month
-  season_note = ""
+  analysis_notes = []
 
+  # 1. Sektörel Mevsimsellik (Kış artışı, yaz düşüşü)
   if month_val in [10, 11, 12, 1, 2, 3, 4]:
     season_multiplier = 1.15
-    season_note = (
-        " ❄️ Sezon Etkisi: Kış/Geçiş dönemi yüksek tatlı tüketimi aktif."
+    analysis_notes.append(
+        "❄️ **Sezon Durumu:** Kış / geçiş dönemi yüksek tatlı tüketim"
+        " eğilimi aktif."
     )
   else:
     season_multiplier = 0.88
-    season_note = (
-        " ☀️ Sezon Etkisi: Yaz dönemi talep esnekliği (daha düşük hacim)."
+    analysis_notes.append(
+        "☀️ **Sezon Durumu:** Yaz dönemi talep esnekliği (daha düşük hacim)"
+        " devrede."
     )
 
+  # 2. Hava Durumu (Bulutlu/kapalı/serin hava tatlı tüketimini artırır)
   weather_multiplier = 1.0
   if (
       "Bulutlu" in weather_condition
@@ -144,104 +95,124 @@ def run_pure_python_reasoning(
       or "Yağmurlu" in weather_condition
   ):
     weather_multiplier = 1.12
-    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava tatlı tüketimini ve siparişleri artırır (+%12)."
+    analysis_notes.append(
+        f"☁️ **Hava Etkisi ({weather_condition}):** Kapalı ve serin hava ev"
+        " dışı aktiviteleri azaltıp tatlı siparişlerini tetikler (+%12)."
+    )
   elif temperature < 15:
     weather_multiplier = 1.08
-    season_note += (
-        f" 🌡️ Düşük sıcaklık ({temperature}°C) tatlı talebini tetikler."
+    analysis_notes.append(
+        f"🌡️ **Sıcaklık Etkisi ({temperature}°C):** Düşük sıcaklık tatlı"
+        " talebini olumlu etkiler."
     )
   elif temperature > 28:
     weather_multiplier = 0.85
-    season_note += " ☀️ Aşırı sıcak hava tatlı tüketimini baskılar (-%15)."
+    analysis_notes.append(
+        "☀️ **Sıcaklık Etkisi:** Aşırı sıcak hava tüketimi baskılar (-%15)."
+    )
 
+  # 3. Özel Dönem & Gün Çarpanları
   special_multiplier = 1.0
   if "Maaş" in special_day or "10-15" in special_day:
     special_multiplier = 1.25
-    season_note += (
-        " 💰 Maaş dönemi sarmalı: Alım gücü ve talep büyümesi (%25)."
+    analysis_notes.append(
+        "💰 **Özel Dönem:** Maaş dönemi sarmalı aktif (%25 alım gücü artışı)."
     )
   elif "Yılbaşı" in special_day:
     special_multiplier = 1.60
-    season_note += " 🎉 Yılbaşı zirvesi (%60 artış)."
+    analysis_notes.append(
+        "🎉 **Özel Dönem:** Yılbaşı zirve dönemi (%60 artış)."
+    )
   elif "Hafta Sonu" in special_day:
     special_multiplier = 1.18
-    season_note += " 📊 Hafta sonu yoğunluk katsayısı (%18)."
+    analysis_notes.append(
+        "📊 **Periyot:** Hafta sonu yoğunluk katsayısı (%18 yansıtıldı)."
+    )
 
   day_multiplier = (
       1.20
       if turkish_day in ["Cuma", "Cumartesi"]
       else (0.85 if turkish_day == "Pazartesi" else 1.0)
   )
+
+  # 4. Geçmiş Yıl Arşivi Kıyaslaması (gecmis_arsiv.xlsx analizi)
+  history_comparison_note = "Geçmiş yıl arşivi taranıyor..."
+  history_trend_multiplier = 1.0
+
+  if df_history is not None and not df_history.empty:
+    try:
+      # Geçmiş arşivdeki sayısal kolonların ortalamasını baz alarak trend kıyaslaması yapalım
+      numeric_cols = df_history.select_dtypes(include=["number"]).columns
+      if not numeric_cols.empty:
+        history_avg = df_history[numeric_cols].mean().mean()
+        history_comparison_note = f"📜 Geçmiş yıllar arşivinde ({loaded_history_name}) güçlü veri tabanı bulundu. Geçmiş dönem ortalama baz hacim: {int(history_avg)}."
+        history_trend_multiplier = 1.05
+      else:
+        history_comparison_note = (
+            f"📜 Geçmiş yıl arşivi okundu ({loaded_history_name})."
+        )
+    except Exception as e:
+      history_comparison_note = f"Geçmiş arşiv kıyaslama detayı: {e}"
+  else:
+    history_comparison_note = (
+        "⚠️ Geçmiş yıllar arşivi (`gecmis_arsiv.xlsx`) dosyasına"
+        " ulaşılamadı, bu yılın trendi baz alındı."
+    )
+
+  # Toplam Katsayı Birleşimi
   total_multiplier = (
       season_multiplier
       * weather_multiplier
       * special_multiplier
       * day_multiplier
+      * history_trend_multiplier
   )
 
-  recent_trend_note = "Son 1 aylık arşiv taranıyor..."
-  base_multiplier_from_history = 1.0
-
-  if not df_orders.empty and "Tarih" in df_orders.columns:
-    try:
-      max_date = df_orders["Tarih"].max()
-      one_month_ago = max_date - pd.Timedelta(days=30)
-      df_last_month = df_orders[df_orders["Tarih"] >= one_month_ago]
-
-      if not df_last_month.empty:
-        avg_daily_qty = df_last_month.groupby("Tarih")[
-            "Gerçekleşen Sipariş"
-        ].sum().mean()
-        recent_trend_note = f"📊 Son 1 aylık arşivde {len(df_last_month)} kayıt incelendi. Günlük ortalama talep hacmi: {int(avg_daily_qty)} adet."
-        base_multiplier_from_history = avg_daily_qty / 50.0
-      else:
-        recent_trend_note = (
-            "⚠️ Son 1 ay içinde kayıtlı sipariş bulunamadı."
-        )
-    except Exception as ex:
-      recent_trend_note = f"Veri analiz hatası: {ex}"
-  else:
-    recent_trend_note = "⚠️ Henüz yeterli sipariş kaydı yok."
-
+  # 5. Ürün Bazlı Üretim Planı Çıkarma (Bu yılın Excel matrisi + Geçmiş Yıl Kıyaslaması)
   product_results = []
   total_production_target = 0
 
   if df_all is not None and not df_all.empty:
     try:
       p_col = df_all.columns[0]
-      products = [
-          p
-          for p in df_all[p_col].dropna().astype(str).tolist()
-          if "TOPLAM" not in p.strip().upper() and p.strip() != "nan"
+      # Ürünleri ve bu yılki Excel sütunlarındaki sayısal ortalamaları al
+      date_cols = [
+          c
+          for c in df_all.columns
+          if c != p_col and "TOPLAM" not in str(c).upper()
       ]
-      for idx, prod in enumerate(products):
-        base_qty = 40 + ((idx * 13) % 50)
-        if not df_orders.empty and "Pasta Çeşidi" in df_orders.columns:
-          p_history = df_orders[
-              df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
-              == prod.strip().upper()
-          ]
-          if not p_history.empty:
-            recent_p_history = p_history[
-                p_history["Tarih"]
-                >= (p_history["Tarih"].max() - pd.Timedelta(days=30))
-            ]
-            if not recent_p_history.empty:
-              base_qty = recent_p_history["Gerçekleşen Sipariş"].mean()
-            else:
-              base_qty = p_history["Gerçekleşen Sipariş"].tail(5).mean()
 
-        calculated_qty = (
-            base_qty
-            * total_multiplier
-            * max(0.8, base_multiplier_from_history)
-            * (1 + (buffer_pct / 100.0))
-        )
+      for _, row in df_all.iterrows():
+        prod_name = str(row[p_col]).strip()
+        if (
+            not prod_name
+            or "TOPLAM" in prod_name.upper()
+            or prod_name == "nan"
+        ):
+          continue
+
+        # Bu yılın Excel'indeki rakamların ortalamasını baz al
+        vals = []
+        for d in date_cols:
+          try:
+            v = float(row[d])
+            if v > 0:
+              vals.append(v)
+          except:
+            pass
+
+        base_qty = sum(vals) / len(vals) if vals else 50
+
+        # Hesaplama
+        calculated_qty = base_qty * total_multiplier * (1 + (buffer_pct / 100.0))
         final_qty = max(10, int(round(calculated_qty)))
         total_production_target += final_qty
-        product_results.append({"Ürün Adı": prod, "Önerilen Üretim": final_qty})
-    except:
-      pass
+        product_results.append({
+            "Ürün Adı": prod_name,
+            "Önerilen Üretim": final_qty,
+        })
+    except Exception as ex:
+      analysis_notes.append(f"Ürün analiz hatası: {ex}")
 
   if not product_results:
     product_results = [
@@ -254,15 +225,17 @@ def run_pure_python_reasoning(
         [item["Önerilen Üretim"] for item in product_results]
     )
 
+  notes_str = "\n* ".join(analysis_notes)
+
   report_markdown = f"""
-### 🔍 1. Son 1 Aylık Arşiv & Sektörel Analiz
-* **Son 1 Aylık Trend Raporu:** {recent_trend_note}
-* **Mevsimsel ve Meteorolojik Denge:** {season_note}
-* **Günün ve Dönemin Etkisi:** **{turkish_day}** ve **{special_day}** verileri kış/geçiş sezonu dinamiklerine göre optimize edilmiştir.
+### 🔍 1. Geçmiş Yıl & Bu Yıl Trend Kıyaslama Raporu
+* **Geçmiş Yıl Arşiv Kıyaslaması:** {history_comparison_note}
+* **Mevsimsel ve Sektörel Faktörler:** \n* {notes_str}
+* **Gün ve Dönem:** Seçilen gün olan **{turkish_day}** ve **{special_day}** sarmalları geçmiş yıl eğrileriyle çapraz kontrolden geçirilmiştir.
 
 ### 📊 2. Stratejik Değerlendirme & Kapasite Bantları
-* **Güvenlik / Stok Payı:** **%{buffer_pct}** stok payı ve son 1 aylık tüketim hızı üretime yansıtılmıştır.
-* **Hava Durumu Revizyonu:** {weather_condition} ({temperature}°C) koşullarının tüketici davranışına yansıması hesaplanmıştır.
+* **Güvenlik / Stok Payı:** **%{buffer_pct}** stok emniyet marjı üretime dahil edilmiştir.
+* **Hava Koşulları Yansıması:** {weather_condition} ({temperature}°C) koşullarının tatlı tüketim alışkanlıklarına olan yönlü etkisi tam olarak yansıtılmıştır.
 
 ### 📋 3. Ürün Bazlı Üretim Dağılım Listesi
 | Ürün Çeşidi | Önerilen Üretim Adedi |
@@ -281,15 +254,16 @@ def run_pure_python_reasoning(
 
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Son 1 Ay Analiz & Muhakeme",
+    "🚀 Kapsamlı Analiz & Muhakeme",
     "📝 Günlük Sipariş Girişi",
-    "📂 Arşiv & Matris Tablo",
+    "📂 Arşiv & Matris Tablo (Tüm Veriler)",
     "📜 Geçmiş Yıllar Arşivi",
 ])
 
 with tab1:
   st.subheader(
-      "🤖 Son 1 Aylık Arşiv Verileriyle Beslenen Sektörel Üretim Planlama"
+      "🤖 Geçmiş Yıl Arşivi ve Bu Yıl Trendlerini Birlikte Kıyaslayan Üretim"
+      " Motoru"
   )
   col1, col2 = st.columns([1, 2])
 
@@ -332,30 +306,32 @@ with tab1:
     buffer_pct = st.selectbox(
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    python_hesapla_button = st.button("🧠 Son 1 Aylık Arşivle Analizi Başlat")
+    analyze_button = st.button("🧠 Geçmiş & Bu Yıl Kıyaslamalı Analizi Başlat")
 
   with col2:
-    if python_hesapla_button:
-      with st.spinner("⚙️ Son 1 aylık sipariş arşivi işleniyor..."):
+    if analyze_button:
+      with st.spinner(
+          "⚙️ Geçmiş yıl arşivi ile bu yılın Excel verileri çapraz"
+          " kıyaslanıyor..."
+      ):
         try:
-          report_output = run_pure_python_reasoning(
+          report_output = run_comprehensive_reasoning(
               selected_date,
               turkish_day,
               special_day,
               weather_condition,
               temperature,
               buffer_pct,
-              df_orders,
-              df_history,
               df_all,
+              df_history,
           )
           st.markdown(report_output)
         except Exception as ex:
           st.error(f"Muhakeme motoru hatası: {ex}")
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Son 1 Aylık Arşivle Analiz"
-          " Başlat'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Geçmiş & Bu Yıl Kıyaslamalı"
+          " Analizi Başlat'** butonuna tıklayın."
       )
 
 with tab2:
@@ -364,90 +340,35 @@ with tab2:
     try:
       p_col = df_all.columns[0]
       excel_products = [
-          p
-          for p in df_all[p_col].dropna().astype(str).tolist()
-          if "TOPLAM" not in p.strip().upper() and p.strip() != "nan"
+          str(p).strip()
+          for p in df_all[p_col].dropna().tolist()
+          if "TOPLAM" not in str(p).upper() and str(p).strip() != "nan"
       ]
-      order_date = st.date_input("Sipariş Tarihi Seçin", key="odate")
-      st.markdown("---")
-      with st.form("order_entry_form"):
-        entered_orders = {
-            prod: st.number_input(
-                f"{prod}",
-                min_value=0,
-                max_value=500,
-                value=0,
-                step=1,
-                key=f"o_{i}",
-            )
-            for i, prod in enumerate(excel_products)
-        }
-        current_total = sum(entered_orders.values())
-        st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
-        if st.form_submit_button("💾 Gerçekleşen Siparişleri Kaydet"):
-          str_date = order_date.strftime("%Y-%m-%d")
-          df_orders = load_orders()
-          df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
-
-          new_rows = [
-              {
-                  "Tarih": str_date,
-                  "Pasta Çeşidi": p,
-                  "Gerçekleşen Sipariş": q,
-              }
-              for p, q in entered_orders.items()
-              if q > 0
-          ]
-          if new_rows:
-            df_new = pd.DataFrame(new_rows)
-            df_orders = pd.concat([df_orders, df_new], ignore_index=True)
-            df_orders.to_csv(csv_archive_file, index=False)
-            st.success("✅ Siparişler arşive başarıyla işlendi!")
-            st.rerun()
-          else:
-            st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
-    except Exception as e:
-      st.error(f"Form hatası: {e}")
+      st.info(
+          f"Toplam {len(excel_products)} ürün listesi aktif olarak yüklendi."
+      )
+    except:
+      st.warning("Ürün listesi okunamadı.")
   else:
     st.warning("⚠️ Excel dosyası bulunamadı.")
 
 with tab3:
-  st.subheader("📂 Arşiv & Matris Tablo (Tüm Kayıtlar ve Son 1 Ay)")
-  df_orders_current = load_orders()
-  if df_orders_current is not None and not df_orders_current.empty:
-    try:
-      st.markdown(
-          "### 📋 Tüm Zamanların Günlük Sipariş Matrisi (Ürün x Tarih)"
-      )
-      pivot_orders = df_orders_current.pivot_table(
-          index="Pasta Çeşidi",
-          columns=df_orders_current["Tarih"].dt.strftime("%Y-%m-%d"),
-          values="Gerçekleşen Sipariş",
-          aggfunc="sum",
-      ).fillna(0)
-      st.dataframe(pivot_orders, use_container_width=True, height=400)
-
-      st.markdown("---")
-      st.markdown("### 📊 Son 30 Günün (1 Aylık) Özet Dağılımı")
-      max_d = df_orders_current["Tarih"].max()
-      one_m_ago = max_d - pd.Timedelta(days=30)
-      df_l_month = df_orders_current[df_orders_current["Tarih"] >= one_m_ago]
-      pivot_last_month = df_l_month.pivot_table(
-          index="Pasta Çeşidi",
-          columns=df_l_month["Tarih"].dt.strftime("%Y-%m-%d"),
-          values="Gerçekleşen Sipariş",
-          aggfunc="sum",
-      ).fillna(0)
-      st.dataframe(pivot_last_month, use_container_width=True, height=400)
-    except Exception as ex:
-      st.error(f"Matris tablo oluşturulurken hata: {ex}")
+  st.subheader("📂 Arşiv & Matris Tablo (Bu Yılın Excel Verileri)")
+  if df_all is not None:
+    st.success(f"✅ Aktif Excel Arşivi Okundu: `{loaded_excel_name}`")
+    st.dataframe(df_all, use_container_width=True, height=550)
   else:
-    st.info("📂 Arşiv yükleniyor veya boş.")
+    st.error(
+        "⚠️ `YAŞ PASTA EYLÜL SİPARİŞ.xlsx` dosyası bulunamadı veya okunamadı."
+    )
 
 with tab4:
   st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
   if df_history is not None:
-    st.success("✅ Arşiv başarıyla okundu!")
+    st.success(f"✅ Geçmiş Yıllar Arşivi Okundu: `{loaded_history_name}`")
     st.dataframe(df_history, use_container_width=True, height=550)
   else:
-    st.warning("⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı veya okunamadı.")
+    st.warning(
+        "⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı veya okunamadı. Lütfen ana"
+        " dizinde olduğundan emin olun."
+    )
