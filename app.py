@@ -14,15 +14,16 @@ st.set_page_config(
 st.title("🍰 Tatlıbak Yaş Pasta Kalıcı Arşiv & Sektörel Tahminleme Motoru")
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
+excel_file_alt = "YAŞ PASTA 2025 SİPARİŞ.xlsx"
 csv_archive_file = "daily_orders.csv"
 historical_excel_file = "gecmis_arsiv.xlsx"
 
-# --- VERİ YÜKLEME VE KALICI ARŞİV KONTROLÜ ---
+# --- VERİ YÜKLEME VE EXCEL ARŞİV KONTROLÜ ---
 
 
 @st.cache_data
 def load_data():
-  for fname in [excel_file, "yas_pasta_eylul_siparis.xlsx", "YAŞ PASTA SİPARİŞ.xlsx"]:
+  for fname in [excel_file, excel_file_alt, "yas_pasta_eylul_siparis.xlsx"]:
     if os.path.exists(fname):
       try:
         xls = pd.ExcelFile(fname)
@@ -31,13 +32,13 @@ def load_data():
           if "SİPARİŞ" in s.upper() or "LİST" in s.upper():
             sheet = s
             break
-        return xls.parse(sheet)
+        return xls.parse(sheet), fname
       except:
         pass
-  return None
+  return None, None
 
 
-df_all = load_data()
+df_all, loaded_excel_name = load_data()
 
 
 @st.cache_data
@@ -55,17 +56,54 @@ def load_historical_data():
 df_history, hist_info = load_historical_data()
 
 
-# Günlük sipariş arşivini güvenli ve kalıcı yükleme
+# Günlük sipariş arşivini kalıcı ve güvenli yükleme (Yoksa Excel'den otomatik türet)
 def load_orders():
   if os.path.exists(csv_archive_file):
     try:
       df = pd.read_csv(csv_archive_file)
-      if "Tarih" in df.columns:
+      if "Tarih" in df.columns and not df.empty:
         df["Tarih"] = pd.to_datetime(df["Tarih"])
         return df
     except:
       pass
-  # Eğer dosya yoksa veya boşsa örnek başlangıç şablonu
+
+  # Eğer CSV yoksa, mevcut Excel dosyalarından verileri dönüştürüp başlangıç arşivi oluştur
+  if df_all is not None:
+    try:
+      # Excel içindeki tarih kolonlarını ve siparişleri tara
+      rows = []
+      p_col = df_all.columns[0]
+      date_cols = [
+          c
+          for c in df_all.columns
+          if c != p_col and "TOPLAM" not in str(c).upper()
+      ]
+
+      for d_col in date_cols:
+        parsed_dt = pd.to_datetime(str(d_col).split()[0], errors="coerce")
+        if pd.notna(parsed_dt):
+          for _, row in df_all.iterrows():
+            p_name = str(row[p_col]).strip()
+            if "TOPLAM" not in p_name.upper() and p_name != "nan":
+              val = row[d_col]
+              try:
+                val_int = int(val) if pd.notna(val) else 0
+              except:
+                val_int = 0
+              if val_int > 0:
+                rows.append({
+                    "Tarih": parsed_dt.strftime("%Y-%m-%d"),
+                    "Pasta Çeşidi": p_name,
+                    "Gerçekleşen Sipariş": val_int,
+                })
+      if rows:
+        df_gen = pd.DataFrame(rows)
+        df_gen.to_csv(csv_archive_file, index=False)
+        df_gen["Tarih"] = pd.to_datetime(df_gen["Tarih"])
+        return df_gen
+    except:
+      pass
+
   return pd.DataFrame(columns=["Tarih", "Pasta Çeşidi", "Gerçekleşen Sipariş"])
 
 
@@ -88,7 +126,6 @@ def run_pure_python_reasoning(
   month_val = target_date.month
   season_note = ""
 
-  # Mevsimsellik (Kış/Sonbahar yüksek talep, Yaz düşük talep)
   if month_val in [10, 11, 12, 1, 2, 3, 4]:
     season_multiplier = 1.15
     season_note = (
@@ -100,7 +137,6 @@ def run_pure_python_reasoning(
         " ☀️ Sezon Etkisi: Yaz dönemi talep esnekliği (daha düşük hacim)."
     )
 
-  # Hava Durumu (Bulutlu, kapalı ve serin hava tatlı tüketimini artırır)
   weather_multiplier = 1.0
   if (
       "Bulutlu" in weather_condition
@@ -108,11 +144,11 @@ def run_pure_python_reasoning(
       or "Yağmurlu" in weather_condition
   ):
     weather_multiplier = 1.12
-    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava ev dışı gezmeyi azaltıp tatlı tüketimini ve siparişleri artırır (+%12)."
+    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava tatlı tüketimini ve siparişleri artırır (+%12)."
   elif temperature < 15:
     weather_multiplier = 1.08
     season_note += (
-        f" 🌡️ Düşük sıcaklık ({temperature}°C) tatlı talebini olumlu tetikler."
+        f" 🌡️ Düşük sıcaklık ({temperature}°C) tatlı talebini tetikler."
     )
   elif temperature > 28:
     weather_multiplier = 0.85
@@ -136,7 +172,6 @@ def run_pure_python_reasoning(
       if turkish_day in ["Cuma", "Cumartesi"]
       else (0.85 if turkish_day == "Pazartesi" else 1.0)
   )
-
   total_multiplier = (
       season_multiplier
       * weather_multiplier
@@ -144,7 +179,6 @@ def run_pure_python_reasoning(
       * day_multiplier
   )
 
-  # Son 1 aylık verilerin analizi
   recent_trend_note = "Son 1 aylık arşiv taranıyor..."
   base_multiplier_from_history = 1.0
 
@@ -165,20 +199,20 @@ def run_pure_python_reasoning(
             "⚠️ Son 1 ay içinde kayıtlı sipariş bulunamadı."
         )
     except Exception as ex:
-      recent_trend_note = f"Son 1 aylık veri analiz hatası: {ex}"
+      recent_trend_note = f"Veri analiz hatası: {ex}"
   else:
     recent_trend_note = "⚠️ Henüz yeterli sipariş kaydı yok."
 
-  # Ürün bazlı üretim listesi
   product_results = []
   total_production_target = 0
 
   if df_all is not None and not df_all.empty:
     try:
+      p_col = df_all.columns[0]
       products = [
           p
-          for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
-          if "TOPLAM" not in p.strip().upper()
+          for p in df_all[p_col].dropna().astype(str).tolist()
+          if "TOPLAM" not in p.strip().upper() and p.strip() != "nan"
       ]
       for idx, prod in enumerate(products):
         base_qty = 40 + ((idx * 13) % 50)
@@ -302,10 +336,7 @@ with tab1:
 
   with col2:
     if python_hesapla_button:
-      with st.spinner(
-          "⚙️ Son 1 aylık sipariş arşivi, hava durumu ve mevsimsel eğriler"
-          " işleniyor..."
-      ):
+      with st.spinner("⚙️ Son 1 aylık sipariş arşivi işleniyor..."):
         try:
           report_output = run_pure_python_reasoning(
               selected_date,
@@ -331,10 +362,11 @@ with tab2:
   st.subheader("📝 Akşam Gelen Reel Sipariş Girişi")
   if df_all is not None:
     try:
+      p_col = df_all.columns[0]
       excel_products = [
           p
-          for p in df_all.iloc[1:, 0].dropna().astype(str).tolist()
-          if "TOPLAM" not in p.strip().upper()
+          for p in df_all[p_col].dropna().astype(str).tolist()
+          if "TOPLAM" not in p.strip().upper() and p.strip() != "nan"
       ]
       order_date = st.date_input("Sipariş Tarihi Seçin", key="odate")
       st.markdown("---")
@@ -354,9 +386,7 @@ with tab2:
         st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
         if st.form_submit_button("💾 Gerçekleşen Siparişleri Kaydet"):
           str_date = order_date.strftime("%Y-%m-%d")
-          # Mevcut dataframe'i yenile
           df_orders = load_orders()
-          # Aynı tarihe ait eski kayıtları temizle
           df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
 
           new_rows = [
@@ -372,9 +402,7 @@ with tab2:
             df_new = pd.DataFrame(new_rows)
             df_orders = pd.concat([df_orders, df_new], ignore_index=True)
             df_orders.to_csv(csv_archive_file, index=False)
-            st.success(
-                "✅ Siparişler başarıyla kaydedildi ve arşive işlendi!"
-            )
+            st.success("✅ Siparişler arşive başarıyla işlendi!")
             st.rerun()
           else:
             st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
@@ -414,11 +442,7 @@ with tab3:
     except Exception as ex:
       st.error(f"Matris tablo oluşturulurken hata: {ex}")
   else:
-    st.info(
-        "📂 Henüz günlük sipariş arşivi oluşmadı. 'Günlük Sipariş Girişi'"
-        " sekmesinden ilk kaydınızı yaptığınızda arşiv burada anında"
-        " görünecektir."
-    )
+    st.info("📂 Arşiv yükleniyor veya boş.")
 
 with tab4:
   st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
