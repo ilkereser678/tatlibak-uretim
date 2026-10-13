@@ -18,6 +18,58 @@ st.title(
     " Hesabı)"
 )
 
+# --- ÇAKIŞMAYI ÖNLEYEN KESİN SERVİS HESABI YETKİLENDİRMESİ ---
+credentials_path = "credentials.json"
+genai_client_configured = False
+
+try:
+  if os.path.exists(credentials_path):
+    # Sadece servis hesabı credentials kullanıyoruz, api_key karıştırmıyoruz
+    credentials = service_account.Credentials.from_service_account_file(
+        credentials_path,
+        scopes=["https://www.googleapis.com/auth/generative-language"],
+    )
+    genai.configure(credentials=credentials)
+    genai_client_configured = True
+  else:
+    st.error(
+        "⚠️ `credentials.json` dosyası ana dizinde bulunamadı! Lütfen"
+        " yüklediğinizden emin olun."
+    )
+except Exception as e:
+  st.error(f"Kimlik doğrulama yapılandırma hatası: {e}")
+
+
+def call_gemini_muhakeme(prompt_text):
+  if not genai_client_configured:
+    return "⚠️ Servis hesabı (credentials.json) ile bağlantı kurulamadı."
+  try:
+    # Gemini 1.5 Flash modeliyle çakışmasız akıllı muhakeme
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt_text)
+    return response.text
+  except Exception as e:
+    return f"Gemini AI Muhakeme Hatası: {e}"
+import datetime
+import json
+import os
+import google.generativeai as genai
+from google.oauth2 import service_account
+from urllib.request import Request, urlopen
+import pandas as pd
+import streamlit as st
+
+st.set_page_config(
+    page_title="Tatlıbak AI Üretim Planlama Asistanı",
+    page_icon="🍰",
+    layout="wide",
+)
+
+st.title(
+    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (Servis"
+    " Hesabı)"
+)
+
 # --- SERVİS HESABI (CREDENTIALS.JSON) İLE YETKİLENDİRME ---
 credentials_path = "credentials.json"
 genai_client_configured = False
