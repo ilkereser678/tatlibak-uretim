@@ -1,8 +1,8 @@
 import datetime
 import json
 import os
-import random
-import google.generativeai as genai
+from google import genai  # Yeni nesil resmi Google GenAI SDK
+from google.genai import errors
 from urllib.request import Request, urlopen
 import pandas as pd
 import streamlit as st
@@ -14,10 +14,10 @@ st.set_page_config(
 )
 
 st.title(
-    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI & Muhakeme Planlama Asistanı"
+    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (GenAI SDK)"
 )
 
-# --- RESMİ GOOGLE SDK İLE API BAĞLANTISI ---
+# --- YENİ NESİL GOOGLE GENAI SDK BAĞLANTISI ---
 api_key = None
 try:
   api_key = st.secrets.get("GEMINI_API_KEY")
@@ -27,22 +27,27 @@ except:
 if not api_key:
   api_key = os.environ.get("GEMINI_API_KEY", "")
 
+# Yeni nesil Client yapısı AQ... anahtarlarını doğrudan ve hatasız destekler
+ai_client = None
 if api_key:
   try:
-    genai.configure(api_key=api_key)
-  except:
-    pass
+    ai_client = genai.Client(api_key=api_key)
+  except Exception as e:
+    st.error(f"GenAI Client başlatılamadı: {e}")
 
 
-def call_gemini_api(prompt_text):
-  if not api_key:
-    return "⚠️ Gemini API anahtarı bulunamadı! Lütfen secrets.toml dosyanızı kontrol edin."
+def call_gemini_muhakeme(prompt_text):
+  if not ai_client:
+    return "⚠️ Gemini API anahtarı (.streamlit/secrets.toml) bulunamadı veya yapılandırılamadı."
   try:
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt_text)
+    # Gemini 2.5 Flash / 1.5 Flash modeliyle gerçek zamanlı akıllı muhakeme
+    response = ai_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt_text,
+    )
     return response.text
   except Exception as e:
-    return f"Gemini API Bağlantı Hatası: {e}"
+    return f"Gemini AI Muhakeme Hatası: {e}"
 
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
@@ -63,16 +68,11 @@ def load_data():
         sheet = s
         break
     return xls.parse(sheet)
-  except Exception as e:
+  except:
     return None
 
 
 df_all = load_data()
-if df_all is None:
-  st.warning(
-      f"⚠️ `{excel_file}` dosyası bulunamadı veya okunamadı. Lütfen dosyanın"
-      " depoda olduğundan emin olun."
-  )
 
 
 @st.cache_data
@@ -170,7 +170,7 @@ def fetch_3day_evening_weather():
 three_day_forecast = fetch_3day_evening_weather()
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Gemini AI Muhakeme Tahmini",
+    "🚀 Gemini AI Canlı Muhakeme",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
@@ -178,7 +178,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Gerçek Gemini AI Zekası ile Muhakemeli Üretim Planlama Asistanı"
+      "🤖 Gemini AI Arşiv Okuma, Kıyaslama ve Uyarı Motoru (Canlı Zeka)"
   )
 
   if three_day_forecast:
@@ -236,66 +236,68 @@ with tab1:
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
     ai_hesapla_button = st.button(
-        "🧠 Gemini AI ile Muhakemeli Üretim Planı Oluştur"
+        "🧠 Gemini AI ile Arşiv Kıyaslamalı Muhakeme Başlat"
     )
 
   with col2:
     if ai_hesapla_button:
       with st.spinner(
-          "🧠 Gemini AI arşivi, geçmiş ekim döngülerini (8-13 Ekim) ve sipariş"
-          " momentumunu muhakeme ediyor..."
+          "🧠 Gemini AI geçmiş arşivleri, ekim döngülerini (8-13 Ekim"
+          " sarmallarını) ve şube momentumunu analiz ediyor..."
       ):
         try:
+          # Ham verileri Gemini AI'ya doğrudan besliyoruz ki kendisi yorumlasın ve muhakeme etsin
           recent_orders_summary = (
-              df_orders.tail(20).to_string()
+              df_orders.tail(30).to_string()
               if not df_orders.empty
               else "Henüz günlük sipariş girilmemiş."
           )
           history_summary = (
-              df_history.head(30).to_string()
+              df_history.head(40).to_string()
               if df_history is not None
-              else "Geçmiş arşiv yok."
+              else "Geçmiş arşiv dosyası bulunamadı."
           )
-          base_excel_summary = (
-              df_all.head(30).to_string()
-              if df_all is not None
-              else "Excel verisi yok."
+          products_summary = (
+              df_all.to_string() if df_all is not None else "Excel listesi yok."
           )
 
           prompt = f"""
-                    Sen Tatlıbak pastacılık üretim planlama sisteminin kıdemli yapay zeka muhakeme uzmanısın. Asla ezbere ve sabit rakamlar verme. Seçilen günün özelliklerine, haftanın hangi gününe denk geldiğine, geçmişteki ekim ayı dalgalarına (örneğin 8 Ekim 1317, 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim 1263 düşüşü gibi geçmiş verilerdeki non-linear sarmallara) ve şubelerden gelen sipariş momentumuna dayanarak her defasında tamamen o güne özel özgün üretim planı kurgula ve geçmiş yıla göre uyarılar ver.
+                    Sen Tatlıbak pastacılık üretim planlama sisteminin kıdemli yapay zeka muhakeme ve denetim uzmanısın. 
+                    Asla ezbere, sabit veya statik rakamlar verme. Sistemdeki geçmiş verileri, ekim ayı döngülerini ve güncel sipariş momentumunu akıllıca harmanlayarak gerçek bir üretim yöneticisi gibi analiz yap.
                     
-                    HEDEF ANALİZ KRİTERLERİ:
-                    - Hedef Tarih ve Gün: {selected_date.strftime('%d.%m.%Y')} ({turkish_day})
-                    - Özel Durum / Dönem: {special_day}
-                    - Hava Durumu & Sıcaklık: {weather_condition}, {temperature}°C
+                    HEDEF KRİTERLER:
+                    - Üretim / Hedef Tarih: {selected_date.strftime('%d.%m.%Y')} ({turkish_day})
+                    - Özel Dönem: {special_day}
+                    - Hava Koşulları: {weather_condition}, {temperature}°C
                     - Güvenlik / Stok Payı: %{buffer_pct}
                     
-                    VERİ KAYNAKLARI:
-                    1. Son Girilen Gerçek Siparişler:
+                    VERİ TABANI:
+                    1. Son Girilen Gerçek Sipariş Arşivi:
                     {recent_orders_summary}
                     
-                    2. Geçmiş Yıllar Arşivi:
+                    2. Geçmiş Yıllar Arşivi (Örn. Ekim Ayı Seyirleri - 8 Ekim 1317, 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim 1263 düşüş sarmalları):
                     {history_summary}
                     
-                    3. Ürün Çeşit Yapısı:
-                    {base_excel_summary}
+                    3. Ürün Çeşit Listesi:
+                    {products_summary}
                     
-                    GÖREVLERİN:
-                    1. Geçmiş arşivdeki benzer dönemlerin (örneğin Ekim ortası sarmalları) artış ve azalış eğrilerini inceleyerek bugünkü durumla kıyasla.
-                    2. Yöneticiye şu formatta muhakemeli bir rapor sun:
-                       - **Muhakeme & Arşiv Kıyaslama Uyarısı:** Geçmiş yılın aynı dönemiyle bugünkü trendi kıyaslayarak dikkat edilmesi gereken noktaları ve uyarıları açıkla.
-                       - **Üretim Listesi Raporu:** Ürün bazlı nihai üretim adetleri ve en altta TOPLAM PASTA SAYISI.
+                    YÖNETİCİYE SUNACAĞIN RAPOR FORMATI:
+                    1. 🔍 **Arşiv Muhakemesi & Trend Uyarısı:** Geçmiş yılların aynı dönemindeki (örneğin ekim ortası) sarmalları ve düşüş/çıkış eğrilerini bugünkü sipariş verileriyle kıyasla. Yöneticiyi olası risklere veya fırsatlara karşı net bir dille uyar.
+                    2. 📊 **Özet Durum & Strateji:** Şube kapasite bantlarını ve güvenli stok payını (%{buffer_pct}) dikkate alarak toplam üretim hedefinin neden bu seviyede belirlendiğini açıkla.
+                    3. 📋 **Ürün Bazlı Üretim Dağılım Listesi:** Ürün çeşitlerine göre adil, dengeli ve gerçekçi üretim adetlerini tablo veya net liste halinde sun. En altta mutlaka **TOPLAM ÜRETİM HEDEFİ** rakamını belirt.
                     """
 
-          ai_text = call_gemini_api(prompt)
-          st.markdown(ai_text)
+          ai_response_text = call_gemini_muhakeme(prompt)
+          st.markdown(ai_response_text)
+
         except Exception as ex:
-          st.error(f"Gemini AI analizi sırasında hata oluştu: {ex}")
+          st.error(
+              f"Gemini AI muhakeme motoru çalıştırılırken hata oluştu: {ex}"
+          )
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Muhakemeli Üretim"
-          " Planı Oluştur'** butonuna tıklayın."
+          "👈 Sol panelden kriterleri seçip **'Gemini AI ile Arşiv Kıyaslamalı"
+          " Muhakeme Başlat'** butonuna tıklayın."
       )
 
 with tab2:
