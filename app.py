@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import google.generativeai as genai
+from google.oauth2 import service_account
 from urllib.request import Request, urlopen
 import pandas as pd
 import streamlit as st
@@ -12,38 +13,47 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru")
+st.title(
+    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (Servis"
+    " Hesabı)"
+)
 
-# --- GEMINI API BAĞLANTISI ---
-api_key = None
+# --- SERVİS HESABI (CREDENTIALS.JSON) İLE YETKİLENDİRME ---
+credentials_path = "credentials.json"
+genai_client_configured = False
+
 try:
-  api_key = st.secrets.get("GEMINI_API_KEY")
-except:
-  pass
-
-if not api_key:
-  api_key = os.environ.get("GEMINI_API_KEY", "")
-
-if api_key:
-  try:
-    genai.configure(api_key=api_key)
-  except Exception as e:
-    st.error(f"API Yapılandırma Hatası: {e}")
+  if os.path.exists(credentials_path):
+    # Google Cloud Servis Hesabı üzerinden kimlik doğrulama
+    credentials = service_account.Credentials.from_service_account_file(
+        credentials_path,
+        scopes=["https://www.googleapis.com/auth/generative-language"],
+    )
+    genai.configure(credentials=credentials)
+    genai_client_configured = True
+  else:
+    # Eğer localde yoksa Streamlit Secrets üzerinden dene
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    if api_key:
+      genai.configure(api_key=api_key)
+      genai_client_configured = True
+except Exception as e:
+  st.error(f"Kimlik doğrulama yapılandırma hatası: {e}")
 
 
 def call_gemini_muhakeme(prompt_text):
-  if not api_key:
+  if not genai_client_configured:
     return (
-        "⚠️ Gemini API anahtarı (.streamlit/secrets.toml) bulunamadı. Lütfen"
-        " anahtarınızı kontrol edin."
+        "⚠️ Servis hesabı (credentials.json) veya API anahtarı"
+        " doğrulanamadı!"
     )
   try:
-    # Gemini modeli ile gerçek zamanlı akıllı muhakeme ve analiz
+    # Gemini 1.5 Flash modeliyle gerçek zamanlı akıllı muhakeme
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(prompt_text)
     return response.text
   except Exception as e:
-    return f"Gemini API Muhakeme Hatası: {e}"
+    return f"Gemini AI Muhakeme Hatası: {e}"
 
 
 excel_file = "YAŞ PASTA EYLÜL SİPARİŞ.xlsx"
@@ -254,7 +264,6 @@ with tab1:
               df_all.to_string() if df_all is not None else "Excel listesi yok."
           )
 
-          # Kapsamlı prompt ile tam muhakeme gücü doğrudan Gemini'ye devrediliyor
           prompt = f"""
                     Sen Tatlıbak pastacılık üretim planlama sisteminin kıdemli yapay zeka muhakeme ve denetim uzmanısın. 
                     Asla ezbere, sabit veya statik rakamlar verme. Sistemdeki geçmiş arşiv verilerini, ekim ayı döngülerini (örneğin 8 Ekim 1317, 9 Ekim 1452, 10 Ekim 2241, 11 Ekim 2339 zirvesi, 12 Ekim 2019, 13 Ekim 1263 düşüş sarmallarını) ve güncel sipariş momentumunu akıllıca harmanlayarak gerçek bir üretim yöneticisi gibi derinlemesine analiz yap.
