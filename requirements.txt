@@ -1,4 +1,2 @@
-streamlit
-pandas
-openpyxl
-google-generativeai
+pip uninstall google-generativeai
+pip install google-genai
