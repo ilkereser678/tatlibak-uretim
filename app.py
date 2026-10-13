@@ -24,7 +24,6 @@ genai_client_configured = False
 
 try:
   if os.path.exists(credentials_path):
-    # Sadece servis hesabı credentials kullanıyoruz, api_key karıştırmıyoruz
     credentials = service_account.Credentials.from_service_account_file(
         credentials_path,
         scopes=["https://www.googleapis.com/auth/generative-language"],
@@ -44,7 +43,6 @@ def call_gemini_muhakeme(prompt_text):
   if not genai_client_configured:
     return "⚠️ Servis hesabı (credentials.json) ile bağlantı kurulamadı."
   try:
-    # Gemini 1.5 Flash modeliyle çakışmasız akıllı muhakeme
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(prompt_text)
     return response.text
@@ -322,4 +320,112 @@ with tab2:
         }
         current_total = sum(entered_orders.values())
         st.info(f"📊 Girilen Toplam Sipariş Adeti: **{current_total} Adet**")
-        if st.form_submit_button("💾 Gerçek
+        if st.form_submit_button("💾 Gerçekleşen Siparişleri ve Havayı Kaydet"):
+          str_date = order_date.strftime("%Y-%m-%d")
+          if not df_orders.empty:
+            df_orders = df_orders[df_orders["Tarih"] != pd.to_datetime(str_date)]
+          new_rows = [
+              {
+                  "Tarih": str_date,
+                  "Pasta Çeşidi": p,
+                  "Gerçekleşen Sipariş": q,
+              }
+              for p, q in entered_orders.items()
+              if q > 0
+          ]
+          if new_rows:
+            df_orders = pd.concat(
+                [df_orders, pd.DataFrame(new_rows)], ignore_index=True
+            )
+            df_orders.to_csv(csv_archive_file, index=False)
+            st.success("✅ Kayıt başarılı!")
+            st.rerun()
+          else:
+            st.warning("⚠️ 0'dan büyük sipariş girilmedi.")
+    except Exception as e:
+      st.error(f"Sipariş formu yüklenirken hata: {e}")
+  else:
+    st.warning("⚠️ Excel verisi yüklenemediği için sipariş formu açılamıyor.")
+
+with tab3:
+  st.subheader("📂 Arşiv & Matris Tablo")
+  if df_all is not None and not df_orders.empty:
+    try:
+      master_df = df_all.loc[:, ~df_all.columns.str.contains("^Unnamed")]
+      p_col = master_df.columns[0]
+      master_df = master_df[
+          ~master_df[p_col].astype(str).str.upper().str.contains("TOPLAM")
+      ]
+      weather_dict = {}
+      if not df_weather.empty:
+        for _, w_row in df_weather.iterrows():
+          d_str = pd.to_datetime(w_row["Tarih"]).strftime("%Y-%m-%d")
+          weather_dict[d_str] = (
+              f"{str(w_row.get('Sıcaklık (°C)','20')).replace('°C','')}°C -"
+              f" {w_row.get('Hava Durumu','Açık')}"
+          )
+
+      df_orders["Clean_Product"] = (
+          df_orders["Pasta Çeşidi"].astype(str).str.strip().str.upper()
+      )
+      pivot_orders = df_orders.pivot_table(
+          index="Clean_Product",
+          columns=df_orders["T-arih" if "T-arih" in df_orders.columns else "Tarih"].dt.strftime("%Y-%m-%d") if "Tarih" in df_orders.columns else None,
+          values="Gerçekleşen Sipariş",
+          aggfunc="sum",
+      ).fillna(0) if not df_orders.empty else pd.DataFrame()
+      
+      # Düzeltilmiş pivot mantığı:
+      pivot_orders = df_orders.pivot_table(
+          index="Clean_Product",
+          columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
+          values="Gerçekleşen Sipariş",
+          aggfunc="sum",
+      ).fillna(0)
+      
+      master_df["Clean_Product"] = (
+          master_df[p_col].astype(str).str.strip().str.upper()
+      )
+
+      for d_col in pivot_orders.columns:
+        if d_col not in master_df.columns:
+          master_df[d_col] = 0
+        master_df[d_col] = master_df["Clean_Product"].map(
+            pivot_orders[d_col].to_dict()
+        ).fillna(0)
+      master_df = master_df.drop(columns=["Clean_Product"])
+
+      rename_cols, date_row = {}, {p_col: "TARİH"}
+      for col in master_df.columns:
+        if col != p_col:
+          c_str = str(col).split()[0]
+          parsed_dt = pd.to_datetime(c_str, errors="coerce")
+          f_str = (
+              parsed_dt.strftime("%d.%m.%y")
+              if pd.notna(parsed_dt)
+              else str(col)
+          )
+          if c_str in weather_dict:
+            rename_cols[col] = weather_dict[c_str]
+            date_row[weather_dict[c_str]] = f_str
+          else:
+            rename_cols[col] = str(col)
+            date_row[str(col)] = f_str
+
+      master_df = master_df.rename(columns=rename_cols)
+      master_df = pd.concat(
+          [pd.DataFrame([date_row]), master_df], ignore_index=True
+      )
+      st.dataframe(master_df, use_container_width=True, height=500)
+    except Exception as ex:
+      st.error(f"Matris tablo oluşturulurken hata: {ex}")
+  else:
+      st.info("Henüz günlük sipariş arşivi oluşmadı veya Excel yüklenemedi.")
+
+with tab4:
+  st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
+  if df_history is not None:
+    st.success("✅ Arşiv başarıyla okundu!")
+    st.dataframe(df_history, use_container_width=True, height=550)
+  else:
+    st.warning("⚠️ `gecmis_arsiv.xlsx` dosyası bulunamadı veya okunamadı.")
