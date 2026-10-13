@@ -1,8 +1,7 @@
 import datetime
 import json
 import os
-from google import genai  # Yeni nesil resmi Google GenAI SDK
-from google.genai import errors
+import google.generativeai as genai  # Kararlı resmi Google SDK
 from urllib.request import Request, urlopen
 import pandas as pd
 import streamlit as st
@@ -14,10 +13,10 @@ st.set_page_config(
 )
 
 st.title(
-    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (GenAI SDK)"
+    "🍰 Tatlıbak Yaş Pasta Gerçek Gemini AI Muhakeme ve Uyarı Motoru (Resmi SDK)"
 )
 
-# --- YENİ NESİL GOOGLE GENAI SDK BAĞLANTISI ---
+# --- RESMİ GOOGLE SDK İLE API BAĞLANTISI ---
 api_key = None
 try:
   api_key = st.secrets.get("GEMINI_API_KEY")
@@ -27,24 +26,20 @@ except:
 if not api_key:
   api_key = os.environ.get("GEMINI_API_KEY", "")
 
-# Yeni nesil Client yapısı AQ... anahtarlarını doğrudan ve hatasız destekler
-ai_client = None
 if api_key:
   try:
-    ai_client = genai.Client(api_key=api_key)
+    genai.configure(api_key=api_key)
   except Exception as e:
-    st.error(f"GenAI Client başlatılamadı: {e}")
+    st.error(f"GenAI Yapılandırma Hatası: {e}")
 
 
 def call_gemini_muhakeme(prompt_text):
-  if not ai_client:
+  if not api_key:
     return "⚠️ Gemini API anahtarı (.streamlit/secrets.toml) bulunamadı veya yapılandırılamadı."
   try:
-    # Gemini 2.5 Flash / 1.5 Flash modeliyle gerçek zamanlı akıllı muhakeme
-    response = ai_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt_text,
-    )
+    # Kararlı ve güçlü Gemini 1.5 Flash modeliyle gerçek zamanlı akıllı muhakeme
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt_text)
     return response.text
   except Exception as e:
     return f"Gemini AI Muhakeme Hatası: {e}"
@@ -246,7 +241,6 @@ with tab1:
           " sarmallarını) ve şube momentumunu analiz ediyor..."
       ):
         try:
-          # Ham verileri Gemini AI'ya doğrudan besliyoruz ki kendisi yorumlasın ve muhakeme etsin
           recent_orders_summary = (
               df_orders.tail(30).to_string()
               if not df_orders.empty
