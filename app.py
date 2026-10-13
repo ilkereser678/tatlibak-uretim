@@ -11,11 +11,9 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title(
-    "🍰 Tatlıbak Yaş Pasta Sipariş Tahminleme"
-)
+st.title("🍰 Tatlıbak Yaş Pasta Son 1 Ay Arşiv Analiz & Tahminleme Motoru")
 
-# --- GERÇEKÇİ SEKTÖREL MUHAKEME VE ANALİZ MOTORU ---
+# --- SON 1 AYLIK ARŞİVİ VE EĞRİLERİ ANALİZ EDEN SAF PYTHON MOTORU ---
 
 
 def run_pure_python_reasoning(
@@ -30,28 +28,29 @@ def run_pure_python_reasoning(
     df_all,
 ):
   # 1. Mevsimsel ve Hava Durumu Gerçekçi Katsayıları
-  # Kış döneminde (veya serin/bulutlu havada) tatlı tüketimi artar. Yazın düşer.
   month_val = target_date.month
   season_note = ""
 
-  # Kış / Sonbahar / İlkbahar (Ekim-Mart arası) yüksek talep sezonu
   if month_val in [10, 11, 12, 1, 2, 3, 4]:
     season_multiplier = 1.15
-    season_note = " ❄️ Sezon Etkisi: Kış/Geçiş dönemi yüksek tatlı tüketim eğilimi aktif."
+    season_note = (
+        " ❄️ Sezon Etkisi: Kış/Geçiş dönemi yüksek tatlı tüketimi aktif."
+    )
   else:
-    season_multiplier = 0.88  # Yaz dönemi daha sakin
-    season_note = " ☀️ Sezon Etkisi: Yaz dönemi talep esnekliği (daha düşük hacim) uygulandı."
+    season_multiplier = 0.88
+    season_note = (
+        " ☀️ Sezon Etkisi: Yaz dönemi talep esnekliği (daha düşük hacim)."
+    )
 
-  # Hava Durumu Etkisi (Kritik Düzeltme):
-  # Hafif bulutlu, kapalı veya serin havada ev tüketimi ve tatlı talebi ARTAR.
+  # Hava Durumu Etkisi (Bulutlu/Kapalı hava tatlı tüketimini artırır)
   weather_multiplier = 1.0
   if (
       "Bulutlu" in weather_condition
       or "Hafif Yağmurlu" in weather_condition
       or "Yağmurlu" in weather_condition
   ):
-    weather_multiplier = 1.12  # Kapalı/serin hava tatlı satışını %12 tetikler
-    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava ev dışı gezmeyi azaltıp tatlı tüketimini ve ev siparişlerini artırır (+%12)."
+    weather_multiplier = 1.12
+    season_note += f" ☁️ Hava Koşulu ({weather_condition}): Kapalı/serin hava ev dışı gezmeyi azaltıp tatlı tüketimini artırır (+%12)."
   elif temperature < 15:
     weather_multiplier = 1.08
     season_note += (
@@ -59,11 +58,9 @@ def run_pure_python_reasoning(
     )
   elif temperature > 28:
     weather_multiplier = 0.85
-    season_note += (
-        " ☀️ Aşırı sıcak hava tatlı tüketim eğilimini baskılar (-%15)."
-    )
+    season_note += " ☀️ Aşırı sıcak hava tatlı tüketimini baskılar (-%15)."
 
-  # Özel Dönem Çarpanı
+  # Özel Dönem ve Gün Çarpanları
   special_multiplier = 1.0
   if "Maaş" in special_day or "10-15" in special_day:
     special_multiplier = 1.25
@@ -77,12 +74,7 @@ def run_pure_python_reasoning(
     special_multiplier = 1.18
     season_note += " 📊 Hafta sonu yoğunluk katsayısı (%18)."
 
-  # Gün bazlı katsayı
-  day_multiplier = 1.0
-  if turkish_day in ["Cuma", "Cumartesi"]:
-    day_multiplier = 1.20
-  elif turkish_day == "Pazartesi":
-    day_multiplier = 0.85
+  day_multiplier = 1.20 if turkish_day in ["Cuma", "Cumartesi"] else (0.85 if turkish_day == "Pazartesi" else 1.0)
 
   total_multiplier = (
       season_multiplier
@@ -91,7 +83,40 @@ def run_pure_python_reasoning(
       * day_multiplier
   )
 
-  # Ürün bazlı dağılım hesaplama
+  # 2. SON 1 AYLIK ARŞİV VERİLERİNİN ANALİZİ
+  recent_trend_note = "Son 1 aylık sipariş arşivi taranıyor..."
+  base_multiplier_from_history = 1.0
+
+  if not df_orders.empty and "Tarih" in df_orders.columns:
+    try:
+      # Son 1 aylık (30 günlük) veriyi filtrele
+      max_date = df_orders["Tarih"].max()
+      one_month_ago = max_date - pd.Timedelta(days=30)
+      df_last_month = df_orders[df_orders["Tarih"] >= one_month_ago]
+
+      if not df_last_month.empty:
+        total_recent_qty = df_last_month["Gerçekleşen Sipariş"].sum()
+        avg_daily_qty = df_last_month.groupby("Tarih")[
+            "Gerçekleşen Sipariş"
+        ].sum().mean()
+        recent_trend_note = f"📊 Son 1 aylık arşivde toplam {len(df_last_month)} kayıt incelendi. Günlük ortalama talep hacmi: {int(avg_daily_qty)} adet."
+        base_multiplier_from_history = (
+            avg_daily_qty / 50.0
+        )  # Ortalama baz alım katsayısı
+      else:
+        recent_trend_note = (
+            "⚠️ Son 1 ay içinde kayıtlı sipariş bulunamadı, genel ortalama baz"
+            " alındı."
+        )
+    except Exception as ex:
+      recent_trend_note = f"Son 1 aylık veri analizinde hata: {ex}"
+  else:
+    recent_trend_note = (
+        "⚠️ Henüz günlük sipariş arşivi oluşmadığı için varsayılan trend"
+        " eğrileri kullanılıyor."
+    )
+
+  # Ürün bazlı üretim dağılımı
   product_results = []
   total_production_target = 0
 
@@ -110,9 +135,22 @@ def run_pure_python_reasoning(
               == prod.strip().upper()
           ]
           if not p_history.empty:
-            base_qty = p_history["Gerçekleşen Sipariş"].tail(5).mean()
+            # Son 1 ayın ürün ortalamasını baz al
+            recent_p_history = p_history[
+                p_history["Tarih"]
+                >= (p_history["Tarih"].max() - pd.Timedelta(days=30))
+            ]
+            if not recent_p_history.empty:
+              base_qty = recent_p_history["Gerçekleşen Sipariş"].mean()
+            else:
+              base_qty = p_history["Gerçekleşen Sipariş"].tail(5).mean()
 
-        calculated_qty = base_qty * total_multiplier * (1 + (buffer_pct / 100.0))
+        calculated_qty = (
+            base_qty
+            * total_multiplier
+            * max(0.8, base_multiplier_from_history)
+            * (1 + (buffer_pct / 100.0))
+        )
         final_qty = max(10, int(round(calculated_qty)))
         total_production_target += final_qty
         product_results.append({"Ürün Adı": prod, "Önerilen Üretim": final_qty})
@@ -131,14 +169,14 @@ def run_pure_python_reasoning(
     )
 
   report_markdown = f"""
-### 🔍 1. Sektörel Muhakeme & Ekim Sarmalları Analizi
+### 🔍 1. Son 1 Aylık Arşiv & Ekim Sarmalları Analizi
+* **Son 1 Aylık Trend Raporu:** {recent_trend_note}
 * **Mevsimsel ve Meteorolojik Denge:** {season_note}
-* **Günün ve Dönemin Etkisi:** **{turkish_day}** ve **{special_day}** verileri harmanlandığında, kış/geçiş sezonu dinamikleri gereği tatlı talebinin yönü doğru şekilde optimize edilmiştir.
-* **Risk / Fırsat Notu:** Kapalı ve serin havalarda şube siparişlerindeki ani artışlar göz önünde bulundurularak emniyetli üretim marjı korunmuştur.
+* **Günün ve Dönemin Etkisi:** **{turkish_day}** ve **{special_day}** verileri harmanlanarak kış/geçiş sezonu dinamiklerine göre optimize edilmiştir.
 
 ### 📊 2. Stratejik Değerlendirme & Kapasite Bantları
-* **Güvenlik / Stok Payı:** Belirlenen **%{buffer_pct}** stok payı üretime yansıtılmıştır.
-* **Hava Durumu Revizyonu:** {weather_condition} ({temperature}°C) koşullarının tüketici davranışına pozitif/negatif yansıması matematiksel çarpanlarla netleştirilmiştir.
+* **Güvenlik / Stok Payı:** Belirlenen **%{buffer_pct}** stok payı ve son 1 aylık tüketim hızı üretime yansıtılmıştır.
+* **Hava Durumu Revizyonu:** {weather_condition} ({temperature}°C) koşullarının tüketici davranışına pozitif yansıması hesaplanmıştır.
 
 ### 📋 3. Ürün Bazlı Üretim Dağılım Listesi
 | Ürün Çeşidi | Önerilen Üretim Adedi |
@@ -209,7 +247,7 @@ else:
   )
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Saf Python Muhakeme Motoru",
+    "🚀 Son 1 Ay Analiz & Muhakeme",
     "📝 Günlük Sipariş Girişi",
     "📂 Arşiv & Matris Tablo",
     "📜 Geçmiş Yıllar Arşivi",
@@ -217,7 +255,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
   st.subheader(
-      "🤖 Gelişmiş Sektörel Mantık & Ekim Sarmalları Üretim Planlama"
+      "🤖 Son 1 Aylık Arşiv Verileriyle Beslenen Saf Python Üretim Planlama"
   )
   col1, col2 = st.columns([1, 2])
 
@@ -260,12 +298,13 @@ with tab1:
     buffer_pct = st.selectbox(
         "Güvenlik / Stok Payı (%)", [0, 5, 10, 15, 20, 25], index=2
     )
-    python_hesapla_button = st.button("🧠 Sektörel Muhakeme Analizini Başlat")
+    python_hesapla_button = st.button("🧠 Son 1 Aylık Arşivle Analizi Başlat")
 
   with col2:
     if python_hesapla_button:
       with st.spinner(
-          "⚙️ Sektörel kurallar ve kış/bulutlu hava çarpanları işleniyor..."
+          "⚙️ Son 1 aylık sipariş arşivi, hava durumu ve mevsimsel eğriler"
+          " işleniyor..."
       ):
         try:
           report_output = run_pure_python_reasoning(
@@ -284,7 +323,7 @@ with tab1:
           st.error(f"Muhakeme motoru hatası: {ex}")
     else:
       st.info(
-          "👈 Sol panelden kriterleri seçip **'Sektörel Muhakeme Analizini"
+          "👈 Sol panelden kriterleri seçip **'Son 1 Aylık Arşivle Analizi"
           " Başlat'** butonuna tıklayın."
       )
 
@@ -338,30 +377,43 @@ with tab2:
     except Exception as e:
       st.error(f"Form hatası: {e}")
   else:
-    st.warning(
-        "⚠️ Excel dosyası bulunamadı. Lütfen ana dizinde Excel dosyanızın"
-        " olduğundan emin olun."
-    )
+    st.warning("⚠️ Excel dosyası bulunamadı.")
 
 with tab3:
-  st.subheader("📂 Arşiv & Matris Tablo")
+  st.subheader("📂 Arşiv & Matris Tablo (Tüm Kayıtlar ve Son 1 Ay)")
   if df_orders is not None and not df_orders.empty:
     try:
+      st.markdown(
+          "### 📋 Tüm Zamanların Günlük Sipariş Matrisi (Ürün x Tarih)"
+      )
       pivot_orders = df_orders.pivot_table(
           index="Pasta Çeşidi",
           columns=df_orders["Tarih"].dt.strftime("%Y-%m-%d"),
           values="Gerçekleşen Sipariş",
           aggfunc="sum",
       ).fillna(0)
-      st.dataframe(pivot_orders, use_container_width=True, height=500)
+      st.dataframe(pivot_orders, use_container_width=True, height=400)
+
+      st.markdown("---")
+      st.markdown("### 📊 Son 30 Günün (1 Aylık) Özet Dağılımı")
+      max_d = df_orders["Tarih"].max()
+      one_m_ago = max_d - pd.Timedelta(days=30)
+      df_l_month = df_orders[df_orders["Tarih"] >= one_m_ago]
+      pivot_last_month = df_l_month.pivot_table(
+          index="Pasta Çeşidi",
+          columns=df_l_month["Tarih"].dt.strftime("%Y-%m-%d"),
+          values="Gerçekleşen Sipariş",
+          aggfunc="sum",
+      ).fillna(0)
+      st.dataframe(pivot_last_month, use_container_width=True, height=400)
     except Exception as ex:
       st.error(f"Matris tablo oluşturulurken hata: {ex}")
   else:
-    st.info(
-        "📂 Henüz günlük sipariş arşivi oluşmadı. 'Günlük Sipariş Girişi'"
-        " sekmesinden ilk kaydınızı yaptığınızda arşiv burada anında"
-        " görünecektir."
-    )
+      st.info(
+          "📂 Henüz günlük sipariş arşivi oluşmadı. 'Günlük Sipariş Girişi'"
+          " sekmesinden ilk kaydınızı yaptığınızda arşiv burada anında"
+          " görünecektir."
+      )
 
 with tab4:
   st.subheader("📜 Geçmiş Yıllar Arşivi (gecmis_arsiv.xlsx)")
