@@ -128,8 +128,11 @@ def tablo_oku(ad, ham):
             except Exception:
                 continue
         raise ValueError("CSV okunamadı")
+    # Excel dosyaları için doğrudan dataframe döndürecek şekilde güncellendi
     xls = pd.ExcelFile(io.BytesIO(ham))
-    return xls
+    sheet_name = [s for s in xls.sheet_names if "siparis" in _norm(s) or "satis" in _norm(s)]
+    sheet_name = sheet_name[0] if sheet_name else xls.sheet_names[0]
+    return xls.parse(sheet_name, header=None)
 
 
 def kaynak_bul(yuklenen, adaylar, anahtarlar, haric=()):
@@ -147,11 +150,7 @@ def kaynak_bul(yuklenen, adaylar, anahtarlar, haric=()):
     return None, None
 
 
-def matris_isle_2026(xls_obj):
-    sheet_name = [s for s in xls_obj.sheet_names if "siparis" in _norm(s) or "satis" in _norm(s)]
-    sheet_name = sheet_name[0] if sheet_name else xls_obj.sheet_names[0]
-    df = xls_obj.parse(sheet_name, header=None)
-    
+def matris_isle_2026(df):
     detay_rows = []
     gunluk_rows = []
     
@@ -449,8 +448,8 @@ def uygulama():
     
     if ad is not None:
         try:
-            xls_obj = tablo_oku(ad, ham)
-            gunluk_2026, detay_2026 = matris_isle_2026(xls_obj)
+            df_matris = tablo_oku(ad, ham)
+            gunluk_2026, detay_2026 = matris_isle_2026(df_matris)
         except Exception as e:
             st.error(f"2026 satış dosyası okunamadı: {e}")
             
