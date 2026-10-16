@@ -509,7 +509,7 @@ def uygulama():
     mod = None
     yontem = "Baz"
     if test is not None:
-        yontem = min(test["mape"], key=test["mape].get)
+        yontem = min(test["mape"], key=test["mape"].get)
         mod = fit_model(X, np.log(veri["Y"].to_numpy(float)), test["alpha"])
 
     def hava_degeri(tarih):
@@ -564,7 +564,6 @@ def uygulama():
             st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}` (Geçmiş veriler üzerinde yapılan geriye dönük testlerde en düşük hata oranını veren yöntem seçilmiştir).")
             st.markdown(f"* **Veri Havuzu Temeli:** Model, geçmiş yılların arşivleri ve 2026 dönemi dahil toplam **{len(veri)} günlük** gerçekleşen satış verisini taramaktadır.")
             
-            # Baz çizgi ve model karşılaştırması
             st.markdown(f"* **Baz Çizgi (Son 6 {GUN_TR[hedef.dayofweek]} Ortalaması):** `{int(round(baz_t))}` adet")
             if mod is not None:
                 st.markdown(f"* **İstatistiksel Regresyon Modeli:** `{int(round(model_t))}` adet")
@@ -617,19 +616,17 @@ def uygulama():
         st.subheader("📝 Çeşit Bazlı Günlük Satış Girişi")
         st.caption("Her akşam o gün üretilen/satılan çeşitleri adet bazında girin. Bu veriler gelecekteki tahminleri ve ürün dağılımını besleyecektir.")
         
-        # Referans ürün listesini bulalım
         ornek_urunler = []
         if detay_2026 is not None and not detay_2026.empty:
             ornek_urunler = sorted(detay_2026["Cesit"].unique().tolist())
         else:
-            ornek_urunler = ["BATON ÇİKOLATALI", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)"]
+            ornek_urunler = ["BATON ÇİKOLATALI", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)"]
 
         with st.form("detay_giris_form"):
             g_tarih = st.date_input("Satış Tarihi", value=BUGUN)
             st.markdown("---")
             
             girilen_degerler = {}
-            # İki sütunlu şık bir form yapısı
             cols = st.columns(2)
             for idx, urun in enumerate(ornek_urunler):
                 col_target = cols[idx % 2]
