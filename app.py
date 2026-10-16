@@ -154,6 +154,14 @@ def matris_isle_2026(df):
     detay_rows = []
     gunluk_rows = []
     
+    # Ürün sıralamasını Excel'deki orijinal sırayla sabitlemek için sütun ve satırları koruyoruz
+    urun_sirasi = []
+    for row_idx in range(2, df.shape[0]):
+        p_ad = str(df.iloc[row_idx, 0]).strip()
+        if p_ad and p_ad.lower() != "nan" and p_ad != "" and "toplam" not in _norm(p_ad):
+            if p_ad not in urun_sirasi:
+                urun_sirasi.append(p_ad)
+                
     for col_idx in range(1, df.shape[1]):
         t = pd.to_datetime(df.iloc[1, col_idx], errors="coerce")
         if pd.isna(t):
@@ -178,7 +186,7 @@ def matris_isle_2026(df):
         
     df_gunluk = pd.DataFrame(gunluk_rows).dropna(subset=["Tarih", "Adet"])
     df_detay = pd.DataFrame(detay_rows).dropna(subset=["Tarih", "Adet"])
-    return df_gunluk, df_detay
+    return df_gunluk, df_detay, urun_sirasi
 
 
 def gecmis_veri_oku():
@@ -253,7 +261,7 @@ def eklenen_gunluk_oku():
 
 
 # ----------------------------------------------------------------------------
-# HAVA DURUMU (Open-Meteo)
+# HAVA DURUMU (Open-Meteo) - İstanbul Sabit
 # ----------------------------------------------------------------------------
 def _hava_df(js):
     g = js["daily"]
@@ -265,7 +273,8 @@ def _hava_df(js):
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
-def hava_getir(lat, lon, bas_iso, bit_iso):
+def hava_getir(bas_iso, bit_iso):
+    lat, lon = 41.01, 28.97  # İstanbul
     parcalar = []
     bas = dt.date.fromisoformat(bas_iso)
     arsiv_son = min(dt.date.fromisoformat(bit_iso), BUGUN - dt.timedelta(days=6))
@@ -409,14 +418,23 @@ def yuvarla_topla(degerler, toplam):
     return taban
 
 
-def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0):
+def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0, orijinal_sira=None):
     if detay is None or detay.empty:
         return pd.DataFrame(), "Veri yok"
     son = detay["Tarih"].max()
     d = detay[detay["Tarih"] > son - pd.Timedelta(days=pencere)]
     hs = hedef.dayofweek >= 4
     maske = d["Tarih"].dt.dayofweek.ge(4) == hs
-    cesitler = list(pd.unique(d["Cesit"]))
+    
+    # Orijinal Excel sırasını koru
+    if orijinal_sira:
+        cesitler = [c for c in orijinal_sira if c in d["Cesit"].unique()]
+        # Listede olmayan ekstra çeşitler varsa ekleyelim
+        for c in d["Cesit"].unique():
+            if c not in cesitler:
+                cesitler.append(c)
+    else:
+        cesitler = list(pd.unique(d["Cesit"]))
 
     genel = d.groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
     genel_pay = genel / (genel.sum() if genel.sum() > 0 else 1)
@@ -442,8 +460,7 @@ def uygulama():
 
     with st.sidebar:
         st.header("⚙️ Ayarlar & Veri")
-        lat = st.number_input("Enlem", value=41.01, format="%.2f")
-        lon = st.number_input("Boylam", value=28.97, format="%.2f")
+        st.info("📍 Konum: **İstanbul** (Otomatik)")
         hava_kullan = st.checkbox("Hava durumunu modele kat", value=True)
         bitti_duzeltme = st.slider("Ürün biten günlerde talep düzeltmesi (%)", 0, 30, 10)
         pencere = st.slider("Ürün dağılımı geriye bakış (gün)", 30, 120, 60)
@@ -458,11 +475,12 @@ def uygulama():
     ad, ham = kaynak_bul(None, GUNLUK_DOSYALAR, ("2026", "satis", "pasta"))
     gunluk_2026 = pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
     detay_2026 = None
+    orijinal_urun_sirasi = []
     
     if ad is not None:
         try:
             df_matris = tablo_oku(ad, ham)
-            gunluk_2026, detay_2026 = matris_isle_2026(df_matris)
+            gunluk_2026, detay_2026, orijinal_urun_sirasi = matris_isle_2026(df_matris)
         except Exception as e:
             st.error(f"2026 satış dosyası okunamadı: {e}")
             
@@ -471,6 +489,9 @@ def uygulama():
     
     if not ek_detay.empty:
         detay_2026 = pd.concat([detay_2026, ek_detay]).drop_duplicates(["Tarih", "Cesit"], keep="last")
+        for c in ek_detay["Cesit"].unique():
+            if c not in orijinal_urun_sirasi:
+                orijinal_urun_sirasi.append(c)
         
     tum_veri_listesi = [gecmis_df, gunluk_2026, ek_gunluk]
     veri = pd.concat([df for df in tum_veri_listesi if not df.empty]).drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
@@ -483,8 +504,7 @@ def uygulama():
 
     hava = None
     if hava_kullan:
-        hava = hava_getir(round(lat, 2), round(lon, 2), veri["Tarih"].min().date().isoformat(),
-                          (BUGUN + dt.timedelta(days=16)).isoformat())
+        hava = hava_getir(veri["Tarih"].min().date().isoformat(), (BUGUN + dt.timedelta(days=16)).isoformat())
     use_weather = False
     if hava is not None and veri["Tarih"].isin(hava["Tarih"]).mean() >= 0.7:
         veri = veri.merge(hava, on="Tarih", how="left")
@@ -559,10 +579,9 @@ def uygulama():
             else:
                 m3.metric("Olası aralık", "hesaplanamadı")
             
-            # --- DETAYLI TAHMİN AÇIKLAMA RAPORU ---
             st.markdown("### 🧠 Akıllı Tahmin ve Karşılaştırma Analitiği")
-            st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}` (Geçmiş veriler üzerinde yapılan geriye dönük testlerde en düşük hata oranını veren yöntem seçilmiştir).")
-            st.markdown(f"* **Veri Havuzu Temeli:** Model, geçmiş yılların arşivleri ve 2026 dönemi dahil toplam **{len(veri)} günlük** gerçekleşen satış verisini taramaktadır.")
+            st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}` (Geriye dönük testlerde en düşük hata oranını veren yöntem seçilmiştir).")
+            st.markdown(f"* **Veri Havuzu Temeli:** Geçmiş yıllar ve 2026 dönemi dahil toplam **{len(veri)} günlük** gerçekleşen satış verisi taranmaktadır.")
             
             st.markdown(f"* **Baz Çizgi (Son 6 {GUN_TR[hedef.dayofweek]} Ortalaması):** `{int(round(baz_t))}` adet")
             if mod is not None:
@@ -570,7 +589,7 @@ def uygulama():
             
             if olculu:
                 mape_val = test['mape'][yontem] * 100
-                st.markdown(f"* **Güvenlik Çarpanı & Hata Payı:** Modelin geçmiş testlerdeki ortalama yüzde hatası (MAPE) **%{mape_val:.1f}** olarak ölçülmüştür. Seçilen güvenlik seviyesi (`{seviye_ad}`) ile bu hata payı dengelenerek son üretim adedine ulaşılmıştır.")
+                st.markdown(f"* **Güvenlik Çarpanı & Hata Payı:** Modelin geçmiş testlerdeki ortalama yüzde hatası (MAPE) **%{mape_val:.1f}** olarak ölçülmüştür. Seçilen güvenlik seviyesi (`{seviye_ad}`) ile dengelenmiştir.")
 
             if mod is not None:
                 st.markdown("**Neden Bu Talep Bekleniyor? (Etken Faktörler):**")
@@ -585,7 +604,7 @@ def uygulama():
         if detay_2026 is None or detay_2026.empty:
             st.info("Detay ürün dağılımı için '2026 pasta satış.xlsx' dosyası kullanılıyor.")
         else:
-            tablo, grup_ad = urun_dagilimi(detay_2026, hedef, uretim, pencere)
+            tablo, grup_ad = urun_dagilimi(detay_2026, hedef, uretim, pencere, orijinal_sira=orijinal_urun_sirasi)
             st.dataframe(tablo, use_container_width=True)
             st.caption(f"Pay dağılımı son {pencere} günlük satışlardan ({grup_ad} günleri) hesaplanmıştır. Toplam = {uretim} adet.")
 
@@ -613,24 +632,44 @@ def uygulama():
             st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
     with tab3:
-        st.subheader("📝 Çeşit Bazlı Günlük Satış Girişi")
-        st.caption("Her akşam o gün üretilen/satılan çeşitleri adet bazında girin. Bu veriler gelecekteki tahminleri ve ürün dağılımını besleyecektir.")
+        st.subheader("📝 Çeşit Bazlı Günlük Satış Girişi (Hızlı Veri Girişi)")
+        st.caption("Aşağıdaki listede ürünler Excel'deki orijinal sıralamasıyla alt alta dizilmiştir. **TAB** tuşunu kullanarak kutular arasında hızla ilerleyebilir ve adetleri pratikçe girebilirsiniz.")
         
-        ornek_urunler = []
-        if detay_2026 is not None and not detay_2026.empty:
-            ornek_urunler = sorted(detay_2026["Cesit"].unique().tolist())
-        else:
-            ornek_urunler = ["BATON ÇİKOLATALI", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)"]
+        orijinal_urun_sirasi = orijinal_urun_sirasi if orijinal_urun_sirasi else [
+            "BATON ÇİKOLATALI",
+            "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+            "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+            "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+            "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+            "BÜYÜK TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+            "BÜYÜK TURTA MUZLU (MUZLU TURTA)",
+            "ORTA TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+            "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+            "ORTA TURTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+            "ORTA TURTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+            "ORTA TURTA MEYVELİ",
+            "ORTA TURTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+            "ORTA TURTA MUZLU (MUZLU TURTA)",
+            "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)",
+            "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU)",
+            "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA MUZLU ÇİLEKLİ)",
+            "SIFIR BOY PASTA ÇİKOLATALI (ÇİKOLATA SOSLU)",
+            "SIFIR BOY PASTA FRAMBUAZ (FRAMBUAZ ÇİLEK)",
+            "SIFIR BOY PASTA MUZLU (MUZLU TURTA)",
+            "SIFIR BOY PASTA MEYVELİ",
+            "BÜYÜK TURTA ÇİLEKLİ OREO PASTA",
+            "ORTA TURTA ÇİLEKLİ OREO PASTA",
+            "SIFIR TURTA ÇİLEKLİ OREO PASTA"
+        ]
 
         with st.form("detay_giris_form"):
             g_tarih = st.date_input("Satış Tarihi", value=BUGUN)
             st.markdown("---")
             
             girilen_degerler = {}
-            cols = st.columns(2)
-            for idx, urun in enumerate(ornek_urunler):
-                col_target = cols[idx % 2]
-                girilen_degerler[urun] = col_target.number_input(f"{urun}", min_value=0, value=0, step=1, key=f"inp_{urun}")
+            # Tek sütun alt alta sıralama (TAB ile hızlı geçiş için)
+            for urun in orijinal_urun_sirasi:
+                girilen_degerler[urun] = st.number_input(f"{urun}", min_value=0, value=0, step=1, key=f"inp_{urun}")
                 
             st.markdown("---")
             kaydet_detay = st.form_submit_button("💾 Çeşit Bazlı Satışları Kaydet")
