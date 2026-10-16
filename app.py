@@ -107,9 +107,10 @@ def ozel_gunler(yillar, ek_metin, secilen_ozel_gunler_tarihleri):
             resmi.add(dt.date(y, m, g))
         for m, g in [(2, 14), (3, 8), (11, 24), (12, 31)]:
             ozel.add(dt.date(y, m, g))
-        ozel.add(nth_weekday(y, 5, 6, 2))
-        ozel.add(nth_weekday(y, 6, 6, 3))
+        ozel.add(nth_weekday(y, 5, 6, 2)) # Anneler Günü (Mayıs 2. Pazar)
+        ozel.add(nth_weekday(y, 6, 6, 3)) # Babalar Günü
     
+    # Kullanıcının eklediği veya seçtiği ek özel günler
     for t_val in secilen_ozel_gunler_tarihleri:
         ozel.add(t_val)
 
@@ -399,6 +400,7 @@ def tahmin_et(cfg, veri, mod, yontem, tarih, sic, yag):
 def detayli_yorum_uret(tarih, sic, yag, xr, mod, sec, baz_t, model_t):
     yorumlar = []
     
+    # Hava durumu yorumu
     if yag >= 5.0:
         yorumlar.append(f"🌧️ **Hava Durumu (Şiddetli Yağış/Sel Riski):** Hava yağışlı ({yag:.1f} mm). Geçmiş benzer günlerde dışarı çıkışların azaldığı ve talebin etkilendiği görülmüştür.")
     elif yag >= 1.0:
@@ -408,9 +410,11 @@ def detayli_yorum_uret(tarih, sic, yag, xr, mod, sec, baz_t, model_t):
     else:
         yorumlar.append(f"🌤️ **Hava Durumu (Normal):** Sıcaklık {sic:.0f}°C seviyesinde, talep açısından olumsuz bir hava engeli bulunmuyor.")
 
+    # Özel gün / tatil kontrolü
     if xr["bayram"].iloc[0] > 0 or xr["ozel_gun"].iloc[0] > 0 or xr["bayram_oncesi"].iloc[0] > 0:
-        yorumlar.append("🎉 **Özel Gün Etkisi:** Seçilen tarih bir resmi tatil, bayram veya özel gün dönemine denk gelmektedir. Bu durum siparişleri yukarı yönlü tetikler.")
+        yorumlar.append("🎉 **Özel Gün Etkisi:** Seçilen tarih bir resmi tatil, bayram veya özel gün (Sevgililer Günü, Anneler Günü vb.) dönemine denk gelmektedir. Bu durum siparişleri yukarı yönlü tetikler.")
 
+    # Model katsayı analizi
     if mod is not None:
         z = ((xr[mod["cols"]] - mod["mu"]) / mod["sd"]).iloc[0]
         katki = pd.Series(mod["w"], index=mod["cols"]) * z
@@ -421,7 +425,7 @@ def detayli_yorum_uret(tarih, sic, yag, xr, mod, sec, baz_t, model_t):
 
 
 # ----------------------------------------------------------------------------
-# ÜRÜN DAĞILIMI (Üretimden kalkanlar filtrelenmiştir)
+# ÜRÜN DAĞILIMI
 # ----------------------------------------------------------------------------
 def yuvarla_topla(degerler, toplam):
     taban = np.floor(degerler).astype(int)
@@ -437,24 +441,15 @@ def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0, orijinal_sira
         return pd.DataFrame(), "Veri yok"
     son = detay["Tarih"].max()
     d = detay[detay["Tarih"] > son - pd.Timedelta(days=pencere)]
-    
-    # SON 30 GÜNDÜR HİÇ SATIŞ YAPILMAYAN (ÜRETİMDEN KALKAN) ÜRÜNLERİ FİLTRELE
-    son_30_gun = detay[detay["Tarih"] > son - pd.Timedelta(days=30)]
-    aktif_urunler = set(son_30_gun[son_30_gun["Adet"] > 0]["Cesit"])
-    
-    # Filtreyi uygulayalım (Eğer tüm liste sıfırsa güvenlik amaçlı d içindekileri baz alalım)
-    if aktif_urunler:
-        d = d[d["Cesit"].isin(aktif_urunler)]
-
     hs = hedef.dayofweek >= 4
     maske = d["Tarih"].dt.dayofweek.ge(4) == hs
     
     if orijinal_sira:
-        cesitler = [c for c in orijinal_sira if c in d["Cesit"].unique() and c in aktif_urunler]
+        cesitler = [c for c in orijinal_sira if c in d["Cesit"].unique()]
+        for c in d["Cesit"].unique():
+            if c not in cesitler:
+                cesitler.append(c)
     else:
-        cesitler = list(pd.unique(d["Cesit"]))
-
-    if not cesitler:
         cesitler = list(pd.unique(d["Cesit"]))
 
     genel = d.groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
@@ -487,6 +482,7 @@ def uygulama():
         secilen_yil = BUGUN.year
         ek_ozel_tarihler = set()
         
+        # Hazır önemli günler seçimi
         cb_anneler = st.checkbox("🌸 Anneler Günü (Mayıs 2. Pazar)")
         cb_yilbasi = st.checkbox("🎄 Yılbaşı Hazırlığı (31 Aralık)")
         cb_ogretmenler = st.checkbox("📚 Öğretmenler Günü (24 Kasım)")
@@ -608,8 +604,10 @@ def uygulama():
             st.info(f"{GUN_TR[hedef.dayofweek]} | Hava: {sic:.0f}°C ({hava_kaynak})")
 
             st.markdown("---")
+            # --- TAHMİNLEME YAP BUTONU ---
             calis_buton = st.button("🚀 Tahminleme Yap", type="primary", use_container_width=True)
 
+        # Butona basılmadığı sürece varsayılan olarak bugünün tahmini gösterilir
         sec, model_t, baz_t, xr = tahmin_et(cfg, veri, mod, yontem, hedef, sic, yag)
         carpan, olculu = carpan_hesapla(seviye)
         uretim = int(round(sec * carpan))
@@ -627,23 +625,24 @@ def uygulama():
             
             st.markdown("### 🧠 Akıllı Tahmin ve Hava/Özel Gün Yorum Analizi")
             
+            # Detaylı yorum motorunu çalıştıralım
             yorumlar = detayli_yorum_uret(hedef.date(), sic, yag, xr, mod, sec, baz_t, model_t)
             for y in yorumlar:
                 st.markdown(f"- {y}")
 
-            st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}`")
+            st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}` (Geriye dönük testlerde en düşük hata oranını veren yöntem).")
             st.markdown(f"* **Baz Çizgi (Son 6 {GUN_TR[hedef.dayofweek]} Ortalaması):** `{int(round(baz_t))}` adet")
             if olculu:
                 mape_val = test['mape'][yontem] * 100
                 st.markdown(f"* **Güvenlik Çarpanı & Hata Payı:** Model ortalama hata payı (MAPE) **%{mape_val:.1f}** seviyesindedir.")
 
-        st.markdown("### 📋 Çeşit Dağılımı (Aktif Ürünler)")
+        st.markdown("### 📋 Çeşit Dağılımı")
         if detay_2026 is None or detay_2026.empty:
             st.info("Detay ürün dağılımı için '2026 pasta satış.xlsx' dosyası kullanılıyor.")
         else:
             tablo, grup_ad = urun_dagilimi(detay_2026, hedef, uretim, pencere, orijinal_sira=orijinal_urun_sirasi)
             st.dataframe(tablo, use_container_width=True)
-            st.caption(f"Son 30 gündür üretilmeyen (Baton vb.) ürünler listeden çıkarılmıştır. Toplam = {uretim} adet.")
+            st.caption(f"Pay dağılımı son {pencere} günlük satışlardan ({grup_ad} günleri) hesaplanmıştır. Toplam = {uretim} adet.")
 
         st.markdown("### 🗓️ Önümüzdeki 7 gün")
         satirlar = []
@@ -670,7 +669,7 @@ def uygulama():
 
     with tab3:
         st.subheader("📝 Çeşit Bazlı Günlük Satış Girişi (Hızlı Veri Girişi)")
-        st.caption("Aşağıdaki listedte ürünler Excel'deki orijinal sıralamasıyla alt alta dizilmiştir. **TAB** tuşunu kullanarak kutular arasında hızla ilerleyebilirsiniz.")
+        st.caption("Aşağıdaki listede ürünler Excel'deki orijinal sıralamasıyla alt alta dizilmiştir. **TAB** tuşunu kullanarak kutular arasında hızla ilerleyebilir ve adetleri pratikçe girebilirsiniz.")
         
         orijinal_urun_sirasi = orijinal_urun_sirasi if orijinal_urun_sirasi else [
             "BATON ÇİKOLATALI",
