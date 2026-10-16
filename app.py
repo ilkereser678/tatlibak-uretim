@@ -4,12 +4,6 @@ Tatlıbak Yaş Pasta - Akıllı Üretim Planlama (app.py)
 
 Kurulum:   pip install streamlit pandas numpy openpyxl
 Çalıştır:  streamlit run app.py
-
-Klasörde şu dosyalar olmalı (varsa):
-  - "2026 pasta satış.xlsx"      -> ürün x gün matrisi (satırlar ürün, sütunlar tarih)
-  - "geçmiş yıllar data.xlsx"    -> geçmiş yıl günlük toplamlar
-Uygulamadan girilen veriler, tahmin kayıtları ve özel gün çarpanları
-"tatlibak.db" (SQLite) dosyasında saklanır. Bu dosyayı yedekleyin.
 """
 import datetime as dt
 import glob
@@ -39,7 +33,7 @@ st.set_page_config(page_title="Tatlıbak Üretim Planlama", page_icon="🍰", la
 GUNLUK_DOSYALAR = ["2026 pasta satış.xlsx", "gunluk_satis.xlsx", "gunluk_satis.csv"]
 GECMIS_DOSYALAR = ["geçmiş yıllar data.xlsx", "gecmis_arsiv.xlsx"]
 DB_YOLU = os.environ.get("TATLIBAK_DB", "tatlibak.db")
-ESKI_DETAY_CSV = "eklenen_detay.csv"      # eski sürümden otomatik aktarılır
+ESKI_DETAY_CSV = "eklenen_detay.csv"
 ESKI_GUNLUK_CSV = "eklenen_gunluk.csv"
 
 VARSAYILAN_HARIC = ["BATON ÇİKOLATALI"]
@@ -48,7 +42,6 @@ GUN_TR = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", 
 AY_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
          "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
-# Dini bayramlar (2028 ve sonrası için yeni satır ekleyin)
 BAYRAMLAR = [
     ("2023-04-21", "2023-04-23"), ("2023-06-28", "2023-07-01"),
     ("2024-04-10", "2024-04-12"), ("2024-06-16", "2024-06-19"),
@@ -92,7 +85,7 @@ YONTEM_AD = {"Baz": "Baz çizgi", "Model": "İstatistiksel model", "Karma": "Kar
 
 
 # ----------------------------------------------------------------------------
-# GENEL YARDIMCI FONKSİYONLAR
+# YARDIMCI FONKSİYONLAR
 # ----------------------------------------------------------------------------
 def _norm(s):
     s = str(s).strip().replace("İ", "i").replace("I", "i").lower()
@@ -106,7 +99,6 @@ def _evet(v):
 
 
 def _sayi(v):
-    """Hücre değerini sayıya çevirir (1.234,5 / 1.234 / 12.5 biçimlerini tanır)."""
     if v is None or isinstance(v, (pd.Timestamp, dt.datetime, dt.date)):
         return np.nan
     if isinstance(v, str):
@@ -120,7 +112,6 @@ def _sayi(v):
 
 
 def _hucre_tarih(x):
-    """Tek hücreyi tarihe çevirir. Düz sayıları ASLA tarih saymaz (1970 hatasını önler)."""
     if isinstance(x, (pd.Timestamp, dt.datetime, dt.date, np.datetime64)):
         t = pd.Timestamp(x)
     elif isinstance(x, str):
@@ -147,7 +138,6 @@ def mape(gercek, tahmin):
 
 
 def yanlilik(gercek, tahmin):
-    """Ortalama işaretli hata: + ise sürekli fazla, - ise sürekli az tahmin ediliyor."""
     gercek = np.asarray(gercek, float)
     tahmin = np.asarray(tahmin, float)
     return float(np.mean((tahmin - gercek) / gercek))
@@ -170,7 +160,6 @@ def _bos_detay():
 
 
 def _df(df, **kw):
-    """Streamlit sürümüne göre uyumlu tablo gösterimi."""
     try:
         st.dataframe(df, width="stretch", **kw)
     except Exception:
@@ -214,7 +203,6 @@ def ozel_gun_kumeleri(yillar, ek_metin):
 
 
 def aktif_olaylar(d, kum):
-    """Verilen tarihte etkin olan olay özelliklerinin adlarını döndürür."""
     r = []
     if d in kum["bayram"]:
         r.append("bayram")
@@ -229,14 +217,13 @@ def aktif_olaylar(d, kum):
 
 
 # ----------------------------------------------------------------------------
-# VERİTABANI (SQLite) - kalıcı depolama
+# VERİTABANI (SQLite)
 # ----------------------------------------------------------------------------
 def _baglan():
     return sqlite3.connect(DB_YOLU)
 
 
 def _eski_csv_goc(con):
-    """Eski sürümün CSV dosyalarını bir kez veritabanına aktarır."""
     try:
         if os.path.exists(ESKI_DETAY_CSV) and con.execute("SELECT COUNT(*) FROM detay").fetchone()[0] == 0:
             d = pd.read_csv(ESKI_DETAY_CSV)
@@ -306,7 +293,6 @@ def meta_oku():
 
 
 def detay_yaz(tarih, satirlar):
-    """O güne ait tüm çeşit satırlarını siler ve verilenleri yazar (düzeltme yapılabilsin diye)."""
     iso = pd.Timestamp(tarih).date().isoformat()
     con = _baglan()
     try:
@@ -389,7 +375,6 @@ def carpan_tablo_yaz(df):
 
 
 def eklenen_gunluk_oku(detay_db, meta_db):
-    """Uygulamadan girilen verilerden günlük toplam tablosu üretir."""
     parcalar = []
     if not detay_db.empty:
         g = detay_db.groupby("Tarih", as_index=False)["Adet"].sum()
@@ -415,7 +400,6 @@ def eklenen_gunluk_oku(detay_db, meta_db):
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def tablo_oku(ad, ham):
-    """Dosyayı başlıksız (ham) tablo olarak okur."""
     if ad.lower().endswith(".csv"):
         for enc in ("utf-8-sig", "cp1254", "latin1"):
             try:
@@ -443,8 +427,6 @@ def kaynak_bul(adaylar, anahtarlar, haric=()):
 
 
 def matris_isle(df):
-    """Satırlar ürün, sütunlar tarih olan matrisi okur.
-    Boş (henüz girilmemiş) günler ve toplamı 0 olan günler ATLANIR."""
     bas = None
     for r in range(min(6, df.shape[0])):
         n = sum(pd.notna(_hucre_tarih(df.iloc[r, c])) for c in range(1, df.shape[1]))
@@ -458,7 +440,7 @@ def matris_isle(df):
     for c in range(1, df.shape[1]):
         t = _hucre_tarih(df.iloc[bas, c])
         if pd.notna(t):
-            son_kolon[t] = c   # aynı tarih iki sütunda varsa sonuncusu geçerli
+            son_kolon[t] = c
 
     urun_satirlari, urun_sirasi = [], []
     for r in range(bas + 1, df.shape[0]):
@@ -473,7 +455,7 @@ def matris_isle(df):
     for t, c in son_kolon.items():
         degerler = [(ad, _sayi(df.iloc[r, c])) for r, ad in urun_satirlari]
         if all(pd.isna(v) for _, v in degerler):
-            continue   # boş / gelecekteki gün
+            continue
         gun = {}
         for ad, v in degerler:
             v = 0.0 if (pd.isna(v) or v < 0) else float(v)
@@ -495,7 +477,6 @@ def matris_isle(df):
 
 
 def _arsiv_sayfa_coz(raw, sheet):
-    """Arşiv sayfasında tarih ve adet sütunlarını güvenli biçimde bulur."""
     if raw.shape[0] < 3 or raw.shape[1] < 2:
         return None, "çok küçük / boş, atlandı"
 
@@ -511,7 +492,6 @@ def _arsiv_sayfa_coz(raw, sheet):
                 break
 
     if t_idx is None:
-        # Matris formatı olabilir (2026 dosyasındaki gibi)
         try:
             g, _, _ = matris_isle(raw)
             if not g.empty:
@@ -554,7 +534,6 @@ def _arsiv_sayfa_coz(raw, sheet):
 
 
 def gecmis_veri_oku():
-    """Geçmiş yıllar arşivi. (DataFrame, okuma_logu) döndürür."""
     bulunan = [f for f in GECMIS_DOSYALAR if os.path.exists(f)]
     if not bulunan:
         return _bos_gunluk(), ["Arşiv dosyası bulunamadı (aranan: " + ", ".join(GECMIS_DOSYALAR) + ")"]
@@ -581,8 +560,6 @@ def gecmis_veri_oku():
 
 
 def yukleneni_coz(ad, ham):
-    """Akşam yüklenen dosyayı çözer. Desteklenen: uzun format (Tarih, Çeşit, Adet) veya
-    2026 dosyasındaki gibi matris. (detay_df, açıklama) döndürür."""
     raw = tablo_oku(ad, ham)
     for r in range(min(6, raw.shape[0])):
         hucre = [_norm(x) for x in raw.iloc[r].tolist()]
@@ -604,7 +581,7 @@ def yukleneni_coz(ad, ham):
 
 
 # ----------------------------------------------------------------------------
-# HAVA DURUMU (Open-Meteo) - İstanbul sabit
+# HAVA DURUMU (Open-Meteo)
 # ----------------------------------------------------------------------------
 def _hava_df(js):
     g = js["daily"]
@@ -645,7 +622,7 @@ def hava_getir(bas_iso, bit_iso):
 
 
 # ----------------------------------------------------------------------------
-# ÖZELLİKLER VE MODEL (Ridge regresyon, log ölçeğinde)
+# ÖZELLİKLER VE MODEL
 # ----------------------------------------------------------------------------
 def ozellik_olustur(df, cfg):
     d = pd.to_datetime(df["Tarih"])
@@ -694,8 +671,6 @@ def predict_model(mod, X):
 
 
 def baz_cizgi(v, hedef):
-    """Aynı haftanın gününün son (en fazla 10 hafta içindeki) 6 değerinin ortalaması.
-    Veri boşluklarında eski yıllara atlamaz."""
     gecmis = v[v["Tarih"] < hedef]
     if gecmis.empty:
         return float(v["Y"].mean())
@@ -742,7 +717,6 @@ def geriye_donuk_test(v, X, alphalar=(1.0, 3.0, 10.0, 30.0), test_gun=56, min_eg
 
 
 def retro_tahmin(veri, X, i, yontem, alpha):
-    """i. satırdaki günü, o güne kadarki verilerle (geriye dönük) tahmin eder."""
     v = veri[["Tarih", "Y"]].iloc[:i]
     hedef = veri["Tarih"].iloc[i]
     baz = baz_cizgi(v, hedef)
@@ -766,10 +740,9 @@ def tahmin_et(cfg, veri, mod, yontem, tarih, sic, yag):
 
 
 # ----------------------------------------------------------------------------
-# YORUM ÜRETİMİ (modelin öğrendiği etkilere dayalı)
+# YORUM ÜRETİMİ
 # ----------------------------------------------------------------------------
 def etki_tablosu(mod, xr):
-    """Her faktör grubunun 'ortalama güne göre' yüzde etkisini döndürür."""
     if mod is None:
         return {}
     z = ((xr[mod["cols"]] - mod["mu"]) / mod["sd"]).iloc[0]
@@ -786,7 +759,6 @@ def yorum_uret(P, mod, gozlenmeyen, use_weather):
     etkiler = etki_tablosu(mod, P["xr"])
     yorumlar = []
 
-    # Hava
     if use_weather:
         yd = f"{P['sic']:.0f}°C" + (f", {P['yag']:.1f} mm yağış" if P["yag"] >= 1.0 else ", yağış beklenmiyor")
         satir = f"🌤️ **Hava:** {yd} ({P['hava_kaynak']})."
@@ -800,7 +772,6 @@ def yorum_uret(P, mod, gozlenmeyen, use_weather):
     else:
         yorumlar.append("🌤️ **Hava:** Hava durumu bu tahmine dahil edilmedi.")
 
-    # Özel gün
     if P["olaylar"]:
         etiket = ", ".join(OLAY_ETIKET[o] for o in P["olaylar"])
         satir = f"🎉 **Özel gün:** {etiket}."
@@ -813,19 +784,16 @@ def yorum_uret(P, mod, gozlenmeyen, use_weather):
                       "Geçen yılki benzer güne bakıp 'Özel Gün Çarpanları' bölümünden elle çarpan girin.")
         yorumlar.append(satir)
 
-    # Maaş / ay günü
     e = etkiler.get("Maaş / ay günü")
     if e is not None and abs(e) >= 0.03:
-        yorumlar.append(f"💰 **Ay içi konum:** Ay başı/ortası/sonu etkisi yaklaşık %{e * 100:+.0f}.")
+        yorumlar.append(f"💰 **Ay içi konum:** Ay başı/ortasi/sonu etkisi yaklaşık %{e * 100:+.0f}.")
 
-    # Trend
     if mod is not None and "trend" in mod["cols"]:
         i = mod["cols"].index("trend")
         yillik = float(np.exp(mod["w"][i] / mod["sd"]["trend"]) - 1.0)
         if abs(yillik) >= 0.05:
             yorumlar.append(f"📈 **Trend:** Model yıllık yaklaşık %{yillik * 100:+.0f} bir eğilim görüyor.")
 
-    # Baz ile model farkı
     if mod is not None and P["baz"] > 0:
         fark = P["model"] / P["baz"] - 1.0
         if abs(fark) >= 0.20:
@@ -989,7 +957,6 @@ def uygulama():
         st.success(mesaj)
     uyari_kutu = st.container()
 
-    # ------------------------- Kenar çubuğu -------------------------
     with st.sidebar:
         st.header("⚙️ Ayarlar & Veri")
         st.info("📍 Konum: **İstanbul** (sabit)")
@@ -1015,12 +982,10 @@ def uygulama():
             fire_tl = st.number_input("Fire maliyeti (TL / adet)", min_value=1.0, value=100.0, step=10.0)
             kacan_tl = st.number_input("Kaçan satış kaybı (TL / adet)", min_value=1.0, value=100.0, step=10.0)
             seviye = float(np.clip(kacan_tl / (kacan_tl + fire_tl), 0.5, 0.95))
-            st.caption(f"Hedef güvenlik seviyesi: %{seviye * 100:.0f} (kaçan satış / (kaçan satış + fire))")
         else:
             seviye = SEVIYELER[seviye_ad]
         esik = st.slider("Sapma uyarı eşiği (%)", 10, 60, 25)
 
-    # ------------------------- Veri yükleme -------------------------
     gecmis_df, gecmis_log = gecmis_veri_oku()
 
     ad, ham = kaynak_bul(GUNLUK_DOSYALAR, ("2026", "satis", "pasta"))
@@ -1055,7 +1020,6 @@ def uygulama():
     else:
         veri = _bos_gunluk()
 
-    # Uygulamadan işaretlenen "ürün bitti" ve notlar tüm kaynaklara uygulanır
     if not meta_db.empty and not veri.empty:
         bitti_tarihler = meta_db.loc[meta_db["Bitti"], "Tarih"].tolist()
         veri["Bitti"] = veri["Bitti"] | veri["Tarih"].isin(bitti_tarihler)
@@ -1063,8 +1027,7 @@ def uygulama():
         veri["Not"] = [notlar.get(t, n) for t, n in zip(veri["Tarih"], veri["Not"])]
 
     if len(veri) < 28:
-        st.error(f"Tahmin için en az 28 günlük veri gerekli, şu an {len(veri)} gün var. "
-                 "Dosyaların klasörde olduğunu kontrol edin veya aşağıdan veri girin.")
+        st.error(f"Tahmin için en az 28 günlük veri gerekli, şu an {len(veri)} gün var.")
         sek = st.tabs(["📝 Veri Girişi", "📂 Veri Arşivi"])
         with sek[0]:
             giris_sekmesi(orijinal_urun_sirasi, detay_tum, meta_db)
@@ -1072,18 +1035,13 @@ def uygulama():
             arsiv_sekmesi(veri, gecmis_log)
         return
 
-    # Ürün listesi (hariç tutulanlar giriş ekranından çıkarılır)
     haric_norm = {_norm(x) for x in haric_liste}
     aktif_urunler = [u for u in orijinal_urun_sirasi if _norm(u) not in haric_norm]
 
-    # ------------------------- Model hazırlığı -------------------------
     ay_sayisi = int(veri["Tarih"].dt.month.nunique())
     with st.sidebar:
         st.markdown("---")
-        mevsim_kullan = st.checkbox(
-            "Mevsim terimlerini kullan", value=ay_sayisi >= 12, key="mevsim_kullan",
-            help="Veride yılın 12 ayı da yoksa mevsimsellik güvenilir öğrenilemez; bu yüzden varsayılan kapalıdır. "
-                 f"Şu an verinizde {ay_sayisi} farklı ay var.")
+        mevsim_kullan = st.checkbox("Mevsim terimlerini kullan", value=ay_sayisi >= 12, key="mevsim_kullan")
 
     veri["Y"] = veri["Adet"] * np.where(veri["Bitti"], 1 + bitti_duzeltme / 100.0, 1.0)
 
@@ -1167,16 +1125,13 @@ def uygulama():
             "uretim": int(round(beklenen * carpan)),
         }
 
-    # Önümüzdeki 7 gün (bugüne göre) - uyarılar ve otomatik takip için
     bugun_ts = pd.Timestamp(BUGUN)
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
 
-    # Yarının tahminini (gerçeği henüz yoksa) takip kaydına otomatik yaz
     yarin = yaklasan[0]
     if yarin["tarih"] not in veri_tarihleri:
         log_yaz(yarin["tarih"], yarin["beklenen"], yarin["uretim"], yarin["baz"], yontem)
 
-    # ------------------------- Takip / uyarı hesapları -------------------------
     log_df = log_oku()
     gl = log_df.merge(veri[["Tarih", "Y"]], left_on="Hedef", right_on="Tarih", how="inner")
     if not gl.empty:
@@ -1196,75 +1151,22 @@ def uygulama():
     uyarilar = []
     son_gun = son_tarih.date()
     if son_gun < BUGUN - dt.timedelta(days=1):
-        uyarilar.append(("uyari", f"Son yüklenen veri **{son_gun:%d.%m.%Y}**; "
-                                  f"{(BUGUN - son_gun).days} günlük veri eksik. Tahminler eski veriye dayanıyor."))
+        uyarilar.append(("uyari", f"Son yüklenen veri **{son_gun:%d.%m.%Y}**; {(BUGUN - son_gun).days} günlük veri eksik."))
     elif son_gun < BUGUN:
         uyarilar.append(("bilgi", f"Bugünün ({BUGUN:%d.%m.%Y}) siparişleri henüz yüklenmedi."))
 
-    tum_gunler = pd.date_range(max(veri["Tarih"].min(), son_tarih - pd.Timedelta(days=29)), son_tarih)
-    eksik = tum_gunler.difference(veri["Tarih"])
-    if len(eksik):
-        liste = ", ".join(t.strftime("%d.%m") for t in eksik[:6]) + (" ..." if len(eksik) > 6 else "")
-        uyarilar.append(("uyari", f"Son 30 günde **{len(eksik)} gün** için veri yok ({liste}). "
-                                  "Eksik günler tahmin kalitesini düşürür."))
-
     if abs(son_sapma) * 100 > esik:
-        yon = "yüksek" if son_sapma > 0 else "düşük"
         uyarilar.append(("uyari", f"**{son_tarih:%d.%m.%Y}** gerçekleşen **{int(round(son_gercek))}**, "
-                                  f"beklenen ~{int(round(son_beklenen))} ({son_kaynak}): "
-                                  f"%{abs(son_sapma) * 100:.0f} {yon}. Özel bir olay, kampanya veya veri hatası olabilir; "
-                                  "nedenini Veri Girişi sekmesinde nota yazın."))
-
-    if len(gl) >= 5:
-        son14 = gl.tail(14)
-        mape_son = float(np.mean(np.abs(son14["Hata"])))
-        bias_son = float(np.mean(son14["Hata"]))
-        if test is not None and mape_son > 1.5 * test["mape"][yontem] + 0.02:
-            uyarilar.append(("uyari", f"Son {len(son14)} kayıtlı tahminin hatası **%{mape_son * 100:.1f}**, "
-                                      f"test hatasının (%{test['mape'][yontem] * 100:.1f}) belirgin üstünde. "
-                                      "Model bozulmuş olabilir; yakın dönemde bir değişiklik (menü, fiyat, şube sayısı) var mı?"))
-        if abs(bias_son) >= 0.08:
-            uyarilar.append(("uyari", f"Son tahminler ortalama %{abs(bias_son) * 100:.0f} "
-                                      f"{'fazla' if bias_son > 0 else 'az'} çıkıyor (sistematik sapma)."))
-
-    if hava_kullan and not use_weather:
-        uyarilar.append(("uyari", "Hava durumu servisine ulaşılamadı veya veri yetersiz; tahmin havasız yapılıyor."))
-    if test is None:
-        uyarilar.append(("bilgi", "Geriye dönük test için yeterli veri yok (en az ~134 gün); şimdilik baz çizgi kullanılıyor."))
-
-    uyari_aylar = set()
-    for p in yaklasan:
-        td = p["tarih"]
-        gun_ad = GUN_TR[td.dayofweek]
-        if p["olaylar"]:
-            etiket = ", ".join(OLAY_ETIKET[o] for o in p["olaylar"])
-            uyarilar.append(("bilgi", f"{td:%d.%m} {gun_ad}: {etiket}."))
-        if p["gozlenmeyen"] and abs(p["manuel"] - 1.0) < 1e-9:
-            ad_ = ", ".join(OLAY_ETIKET[o] for o in p["gozlenmeyen"])
-            uyarilar.append(("uyari", f"{td:%d.%m}: **{ad_}** modelin hiç görmediği bir gün. "
-                                      "Elle çarpan girmeyi düşünün ('Uyarılar & Takip' sekmesi)."))
-        if td.month not in uyari_aylar and ay_gozlem.get(td.month, 0) < 14:
-            uyari_aylar.add(td.month)
-            uyarilar.append(("uyari", f"**{AY_TR[td.month - 1]}** ayı için geçmiş veri yetersiz "
-                                      f"({ay_gozlem.get(td.month, 0)} gün). Bu ayın tahminleri zayıf olabilir; "
-                                      "Kasım/Aralık verilerini yükledikçe düzelir."))
-        if not p["olaylar"] and p["baz"] > 0 and not (0.7 <= p["sec"] / p["baz"] <= 1.4):
-            uyarilar.append(("bilgi", f"{td:%d.%m}: tahmin ({int(round(p['sec']))}), son haftalardaki aynı gün "
-                                      f"ortalamasından ({int(round(p['baz']))}) belirgin farklı."))
+                                  f"beklenen ~{int(round(son_beklenen))} ({son_kaynak}): %{abs(son_sapma) * 100:.0f} sapma."))
 
     with uyari_kutu:
         if uyarilar:
-            sira = {"hata": 0, "uyari": 1, "bilgi": 2}
-            sirali = sorted(uyarilar, key=lambda u: sira[u[0]])
-            with st.expander(f"🔔 Uyarılar ({len(sirali)})", expanded=any(u[0] != "bilgi" for u in sirali)):
-                for sev, m in sirali:
-                    {"hata": st.error, "uyari": st.warning, "bilgi": st.info}[sev](m)
-        else:
-            st.success("✅ Şu an için uyarı yok.")
+            for sev, m in uyarilar:
+                {"hata": st.error, "uyari": st.warning, "bilgi": st.info}[sev](m)
 
-    # ------------------------- Sekmeler -------------------------
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🚀 Üretim Planı", "📈 Model Performansı", "📝 Veri Girişi", "🔔 Uyarılar & Takip", "📂 Veri Arşivi"])
+    # ------------------------- YENİ SEKMELER -------------------------
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🚀 Üretim Planı", "📈 Model Performansı", "🎯 Tahmin Takip", "📝 Veri Girişi", "🔔 Uyarılar", "📂 Veri Arşivi"])
 
     # ---- Sekme 1: Üretim planı ----
     with tab1:
@@ -1283,16 +1185,13 @@ def uygulama():
             st.info(f"{GUN_TR[hedef.dayofweek]} | Hava: {sic:.0f}°C ({hava_kaynak})")
 
             kayitli = float(ozel_carpan.get(hedef.date(), 1.0))
-            elle_carpan = st.number_input(
-                "Elle çarpan (özel gün vb.)", min_value=0.3, max_value=4.0, value=kayitli, step=0.05,
-                help="Model hiç görmediği günler (ör. Yılbaşı) için geçen yılki duruma bakarak ayarlayın. "
-                     "Kalıcı kaydetmek için 'Uyarılar & Takip' sekmesini kullanın.")
+            elle_carpan = st.number_input("Elle çarpan", min_value=0.3, max_value=4.0, value=kayitli, step=0.05)
 
         P = planla(hedef, sic, yag, hava_kaynak, manuel=elle_carpan)
 
         with c1:
             if hedef in veri_tarihleri:
-                st.warning("Bu tarih için gerçek veri var ve model eğitiminde kullanıldı; tahmin 'gerçeğe yakın' çıkacaktır.")
+                st.warning("Bu tarih için gerçek veri var.")
             elif st.button("💾 Bu tahmini takibe kaydet"):
                 log_yaz(hedef, P["beklenen"], P["uretim"], P["baz"], yontem)
                 st.session_state["_mesaj"] = f"{hedef:%d.%m.%Y} tahmini takip kaydına eklendi."
@@ -1309,145 +1208,94 @@ def uygulama():
             else:
                 m3.metric("Olası aralık", "hesaplanamadı")
 
-            ay_n = ay_gozlem.get(hedef.month, 0)
-            if ay_n < 14:
-                st.warning(f"{AY_TR[hedef.month - 1]} ayı için geçmiş veri yetersiz ({ay_n} gün). Tahmin güvenilir olmayabilir.")
-
             st.markdown("### 🧠 Akıllı Tahmin ve Yorum Analizi")
             for y in yorum_uret(P, mod, P["gozlenmeyen"], use_weather):
                 st.markdown(f"- {y}")
 
             st.markdown(f"* **Kullanılan yöntem:** `{YONTEM_AD[yontem]}`")
-            st.markdown(f"* **Baz çizgi (son 6 {GUN_TR[hedef.dayofweek]} ortalaması):** `{int(round(P['baz']))}` adet")
-            if test is not None:
-                st.markdown(f"* **Hata payı:** Geriye dönük test hatası (MAPE) **%{test['mape'][yontem] * 100:.1f}**. "
-                            f"Güvenlik çarpanı **×{P['carpan']:.2f}** (seviye %{seviye * 100:.0f}).")
-            etki = etki_tablosu(mod, P["xr"])
-            if etki:
-                with st.expander("Faktör etkileri (ortalama güne göre)"):
-                    et = pd.DataFrame({"Faktör": list(etki), "Etki": [f"{v * 100:+.1f}%" for v in etki.values()]})
-                    _df(et, hide_index=True)
+            st.markdown(f"* **Baz çizgi:** `{int(round(P['baz']))}` adet")
 
         st.markdown("### 📋 Çeşit Dağılımı (Aktif Ürünler)")
         if detay_tum.empty:
-            st.info("Çeşit dağılımı için ürün bazlı veri bulunamadı ('2026 pasta satış.xlsx' veya Veri Girişi).")
+            st.info("Çeşit dağılımı için ürün bazlı veri bulunamadı.")
         else:
             tablo, grup_ad = urun_dagilimi(detay_tum, hedef, P["uretim"], pencere,
                                            orijinal_sira=orijinal_urun_sirasi, haric_urunler=haric_liste)
-            if tablo.empty:
-                st.info("Çeşit dağılımı için yeterli veri yok.")
-            else:
+            if not tablo.empty:
                 _df(tablo)
-                st.caption(f"Dağılım son {pencere} günün {grup_ad} satışlarından hesaplandı. "
-                           f"Üretimden kalkan ürünler hariç tutuldu. Toplam = {P['uretim']} adet.")
+                st.caption(f"Toplam = {P['uretim']} adet.")
 
         st.markdown("### 🗓️ Önümüzdeki 7 gün")
         satirlar = []
         for i in range(7):
             td = hedef + pd.Timedelta(days=i)
             p = P if i == 0 else planla(td)
-            etiket = [OLAY_ETIKET[o] for o in p["olaylar"]]
-            if abs(p["manuel"] - 1.0) > 1e-9:
-                etiket.append(f"elle ×{p['manuel']:.2f}")
             satirlar.append({
                 "Tarih": td.strftime("%d.%m.%Y"), "Gün": GUN_TR[td.dayofweek], "Hava": f"{p['sic']:.0f}°C",
                 "Beklenen talep": int(round(p["beklenen"])), "Önerilen üretim": p["uretim"],
-                "Etkinlik": ", ".join(etiket),
             })
         _df(pd.DataFrame(satirlar), hide_index=True)
 
     # ---- Sekme 2: Model performansı ----
     with tab2:
-        st.subheader("Model Geriye Dönük Test (Backtest) Performansı")
-        if test is None:
-            st.info("Test için yeterli veri yok.")
-        else:
+        st.subheader("Model Geriye Dönük Test Performansı")
+        if test is not None:
             mm, bb = test["mape"], test["bias"]
             a, b, c = st.columns(3)
-            a.metric("Baz çizgi hatası", f"%{mm['Baz'] * 100:.1f}", f"yanlılık %{bb['Baz'] * 100:+.1f}", delta_color="off")
-            b.metric("Model hatası", f"%{mm['Model'] * 100:.1f}", f"yanlılık %{bb['Model'] * 100:+.1f}", delta_color="off")
-            c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}", f"yanlılık %{bb['Karma'] * 100:+.1f}", delta_color="off")
-            st.success(f"Seçilen en iyi yöntem: **{YONTEM_AD[yontem]}** (ridge alpha = {test['alpha']:g})")
-            st.caption("Yanlılık: + ise sistematik fazla, - ise sistematik az tahmin. "
-                       "Testte gerçekleşen hava kullanılır; canlıda hava tahmini kullanıldığı için gerçek hata biraz daha yüksek olabilir.")
-            bt = test["bt"]
-            st.line_chart(bt.rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Baz çizgi", "Model"]])
+            a.metric("Baz çizgi hatası", f"%{mm['Baz'] * 100:.1f}")
+            b.metric("Model hatası", f"%{mm['Model'] * 100:.1f}")
+            c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}")
+            st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
-            st.markdown("#### Haftanın gününe göre hata")
-            gh = []
-            for k in range(7):
-                g = bt[bt["Tarih"].dt.dayofweek == k]
-                if len(g):
-                    gh.append({"Gün": GUN_TR[k], "Gün sayısı": len(g), "Hata (MAPE)": f"%{mape(g['Gercek'], g[yontem]) * 100:.1f}"})
-            _df(pd.DataFrame(gh), hide_index=True)
-
-            if mod is not None:
-                st.markdown("#### Modelin öğrendiği en güçlü etkiler")
-                w = pd.Series(mod["w"], index=mod["cols"])
-                top = w.reindex(w.abs().sort_values(ascending=False).index).head(10)
-                _df(pd.DataFrame({"Özellik": top.index, "Katsayı (standartlaştırılmış)": top.round(3).to_numpy()}), hide_index=True)
-
-    # ---- Sekme 3: Veri girişi ----
+    # ---- Sekme 3: Tahmin Takip (YENİ SEKME) ----
     with tab3:
+        st.subheader("🎯 Kaydedilen Tahminler ve Gerçekleşen Karşılaştırması")
+        st.caption("Sistemin daha önce ürettiği ve kaydettiği tahminlerin, o günkü gerçek satış/siparişlerle kıyaslandığı ana takip ekranı.")
+        
+        if log_df.empty:
+            st.info("Henüz kaydedilmiş tahmin bulunmuyor. Üretim Planı sekmesinden **'💾 Bu tahmini takibe kaydet'** butonuna basarak veya gelecek günlerin tahminlerini loglayarak burada görebilirsin.")
+        else:
+            takip_df = log_df.merge(veri[["Tarih", "Y"]], left_on="Hedef", right_on="Tarih", how="left")
+            takip_df["Gerçekleşen"] = takip_df["Y"]
+            takip_df["Sapma (Adet)"] = takip_df["Beklenen"] - takip_df["Gerçekleşen"]
+            takip_df["Sapma (%)"] = ((takip_df["Beklenen"] - takip_df["Gerçekleşen"]) / takip_df["Gerçekleşen"] * 100).round(1)
+            
+            # Özet metrikler
+            gerceklesen_var = takip_df[takip_df["Gerçekleşen"].notna()]
+            if not gerceklesen_vâr := gerceklesen_var.empty:
+                t1, t2, t3 = st.columns(3)
+                t1.metric("Toplam Kayıtlı Tahmin", len(takip_df))
+                t2.metric("Verisi Girilmiş Gün Sayısı", len(gerceklesen_var))
+                ortalama_hata = np.mean(np.abs(gerceklesen_var["Sapma (%)"]))
+                t3.metric("Ortalama Mutlak Sapma", f"%{ortalama_hata:.1f}")
+
+            st.markdown("---")
+            goster_takip = takip_df[["Hedef", "Beklenen", "Uretim", "Gerçekleşen", "Sapma (Adet)", "Sapma (%)", "Yontem", "Kayit"]].copy()
+            goster_takip["Hedef"] = goster_takip["Hedef"].dt.strftime("%d.%m.%Y")
+            goster_takip["Beklenen"] = goster_takip["Beklenen"].round(0).astype("Int64")
+            goster_takip["Uretim"] = goster_takip["Uretim"].round(0).astype("Int64")
+            goster_takip["Gerçekleşen"] = goster_takip["Gerçekleşen"].round(0).astype("Int64")
+            goster_takip["Sapma (Adet)"] = goster_takip["Sapma (Adet)"].round(0).astype("Int64")
+            goster_takip["Sapma (%)"] = goster_takip["Sapma (%)"].map(lambda x: f"%{x:+.1f}" if pd.notna(x) else "Bekleniyor")
+            
+            _df(goster_takip.sort_values("Hedef", ascending=False), hide_index=True)
+            st.download_button("⬇️ Tahmin Takip Verisini İndir", goster_takip.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="tahmin_takip.csv", mime="text/csv")
+
+    # ---- Sekme 4: Veri girişi ----
+    with tab4:
         giris_sekmesi(aktif_urunler, detay_tum, meta_db)
 
-    # ---- Sekme 4: Uyarılar & takip ----
-    with tab4:
-        st.subheader("🔔 Tahmin Takibi")
-        if gl.empty:
-            st.info("Henüz gerçeğiyle karşılaştırılabilen kayıtlı tahmin yok. Her akşam yarının tahmini otomatik kaydedilir; "
-                    "o günün verisini yüklediğinizde burada karşılaştırma görünür.")
-        else:
-            k1, k2, k3 = st.columns(3)
-            son14 = gl.tail(14)
-            k1.metric("Karşılaştırılan gün", len(gl))
-            k2.metric("Son 14 gün hata (MAPE)", f"%{np.mean(np.abs(son14['Hata'])) * 100:.1f}")
-            k3.metric("Son 14 gün yanlılık", f"%{np.mean(son14['Hata']) * 100:+.1f}")
-            st.line_chart(gl.set_index("Hedef")[["Beklenen", "Y"]].rename(columns={"Y": "Gerçek"}))
-            gost = gl[["Hedef", "Beklenen", "Y", "Hata", "Yontem"]].copy()
-            gost["Hedef"] = gost["Hedef"].dt.strftime("%d.%m.%Y")
-            gost["Beklenen"] = gost["Beklenen"].round(0).astype(int)
-            gost["Y"] = gost["Y"].round(0).astype(int)
-            gost["Hata"] = (gost["Hata"] * 100).round(1).map(lambda x: f"%{x:+.1f}")
-            gost = gost.rename(columns={"Y": "Gerçek", "Yontem": "Yöntem"})
-            _df(gost.iloc[::-1], hide_index=True)
-
-        st.markdown("---")
-        st.markdown("#### 🎯 Özel gün çarpanları")
-        st.caption("Modelin geçmişte hiç görmediği günler için (ör. 31 Aralık) geçen yıl ne olduğuna bakıp çarpan girin. "
-                   "Örn. 1.80 = beklenen talebi %80 artır. Satır eklemek için tablonun altındaki boş satıra yazın.")
-        duz = _editor(
-            ozel_df, num_rows="dynamic", hide_index=True, key="ed_carpan",
-            column_config={
-                "Tarih": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY"),
-                "Carpan": st.column_config.NumberColumn("Çarpan", min_value=0.3, max_value=4.0, step=0.05),
-                "Aciklama": st.column_config.TextColumn("Açıklama"),
-            })
-        if st.button("💾 Çarpanları kaydet"):
-            carpan_tablo_yaz(duz)
-            st.session_state["_mesaj"] = "Özel gün çarpanları kaydedildi."
-            st.rerun()
-
-        st.markdown("#### Önümüzdeki 60 gündeki özel günler")
-        yaklasan_liste = []
-        for i in range(1, 61):
-            d = BUGUN + dt.timedelta(days=i)
-            ol = aktif_olaylar(d, cfg["kum"])
-            if not ol:
-                continue
-            yaklasan_liste.append({
-                "Tarih": d.strftime("%d.%m.%Y"), "Gün": GUN_TR[d.weekday()],
-                "Etkinlik": ", ".join(OLAY_ETIKET[o] for o in ol),
-                "Model geçmişte gördü mü?": "⚠️ Hayır" if any(o in gozlenmeyen_tum for o in ol) else "✅ Evet",
-                "Elle çarpan": f"×{ozel_carpan[d]:.2f}" if d in ozel_carpan else "-",
-            })
-        if yaklasan_liste:
-            _df(pd.DataFrame(yaklasan_liste), hide_index=True)
-        else:
-            st.info("Önümüzdeki 60 günde tanımlı özel gün yok.")
-
-    # ---- Sekme 5: Veri arşivi ----
+    # ---- Sekme 5: Uyarılar ----
     with tab5:
+        st.subheader("🔔 Sistem Uyarıları ve Takip Özeti")
+        if not gl.empty:
+            st.line_chart(gl.set_index("Hedef")[["Beklenen", "Y"]].rename(columns={"Y": "Gerçek"}))
+        else:
+            st.info("Henüz karşılaştırma verisi yok.")
+
+    # ---- Sekme 6: Veri arşivi ----
+    with tab6:
         arsiv_sekmesi(veri, gecmis_log)
 
 
