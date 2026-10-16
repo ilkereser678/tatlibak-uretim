@@ -128,7 +128,6 @@ def tablo_oku(ad, ham):
             except Exception:
                 continue
         raise ValueError("CSV okunamadı")
-    # Excel dosyaları için doğrudan dataframe döndürecek şekilde güncellendi
     xls = pd.ExcelFile(io.BytesIO(ham))
     sheet_name = [s for s in xls.sheet_names if "siparis" in _norm(s) or "satis" in _norm(s)]
     sheet_name = sheet_name[0] if sheet_name else xls.sheet_names[0]
@@ -197,14 +196,29 @@ def gecmis_veri_oku():
         try:
             xls = pd.ExcelFile(dosya)
             for sheet in xls.sheet_names:
-                df = xls.parse(sheet)
-                n = {c: _norm(c) for c in df.columns}
-                t_c = next((c for c, x in n.items() if "tarih" in x), df.columns[0])
-                a_c = next((c for c, x in n.items() if "adet" in x or "toplam" in x), df.columns[1])
+                # Başlıksız da okunabilmesi için header=None ile okuyup esnek tespit yapıyoruz
+                df_raw = xls.parse(sheet, header=None)
+                
+                t_col_idx, a_col_idx = 0, 1
+                # Sütunları tarayarak tarih ve sayısal (adet) içeren kolonları bulalım
+                for c_idx in range(df_raw.shape[1]):
+                    col_vals = df_raw.iloc[:, c_idx]
+                    parsed_dates = pd.to_datetime(col_vals, errors="coerce")
+                    if parsed_dates.notna().mean() > 0.5:
+                        t_col_idx = c_idx
+                        break
+                        
+                for c_idx in range(df_raw.shape[1]):
+                    if c_idx == t_col_idx:
+                        continue
+                    num_vals = pd.to_numeric(df_raw.iloc[:, c_idx], errors="coerce")
+                    if num_vals.notna().mean() > 0.5:
+                        a_col_idx = c_idx
+                        break
                 
                 temp = pd.DataFrame({
-                    "Tarih": _tarih(df[t_c]),
-                    "Adet": df[a_c].map(_sayi),
+                    "Tarih": _tarih(df_raw.iloc[:, t_col_idx]),
+                    "Adet": df_raw.iloc[:, a_col_idx].map(_sayi),
                     "Bitti": False,
                     "Not": f"Arşiv ({sheet})"
                 }).dropna(subset=["Tarih", "Adet"])
@@ -542,7 +556,7 @@ def uygulama():
             else:
                 m3.metric("Olası aralık", "hesaplanamadı")
             
-            st.markdown(f"Yöntem: **{YONTEM_AD[yontem]}**. Toplam veri havuzu: **{len(veri)} gün** (2024, 2025 ve 2026 verileri aktif).")
+            st.markdown(f"Yöntem: **{YONTEM_AD[yontem]}**. Toplam veri havuzu: **{len(veri)} gün** (Geçmiş yıllar ve 2026 verileri aktif).")
 
             if mod is not None:
                 st.markdown("**Neden bu tahmin?**")
