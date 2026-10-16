@@ -153,13 +153,14 @@ def matris_isle_2026(df):
     detay_rows = []
     gunluk_rows = []
     
+    # 2026 pasta satış dosyasında tarihler 1. satırda yer alır
     for col_idx in range(1, df.shape[1]):
-        t = pd.to_datetime(df.iloc[0, col_idx], errors="coerce")
+        t = pd.to_datetime(df.iloc[1, col_idx], errors="coerce")
         if pd.isna(t):
             continue
         
         gunluk_toplam = 0
-        for row_idx in range(1, df.shape[0]):
+        for row_idx in range(2, df.shape[0]):
             p_ad = str(df.iloc[row_idx, 0]).strip()
             val = _sayi(df.iloc[row_idx, col_idx])
             if pd.isna(val) or val < 0:
@@ -169,7 +170,7 @@ def matris_isle_2026(df):
                 gunluk_toplam = val
                 continue
             
-            if p_ad and p_ad.lower() != "nan":
+            if p_ad and p_ad.lower() != "nan" and p_ad != "":
                 boy = "Standart"
                 if "büyük" in _norm(p_ad): boy = "Büyük"
                 elif "orta" in _norm(p_ad): boy = "Orta"
@@ -196,11 +197,8 @@ def gecmis_veri_oku():
         try:
             xls = pd.ExcelFile(dosya)
             for sheet in xls.sheet_names:
-                # Başlıksız da okunabilmesi için header=None ile okuyup esnek tespit yapıyoruz
                 df_raw = xls.parse(sheet, header=None)
-                
                 t_col_idx, a_col_idx = 0, 1
-                # Sütunları tarayarak tarih ve sayısal (adet) içeren kolonları bulalım
                 for c_idx in range(df_raw.shape[1]):
                     col_vals = df_raw.iloc[:, c_idx]
                     parsed_dates = pd.to_datetime(col_vals, errors="coerce")
