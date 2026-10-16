@@ -117,7 +117,7 @@ def ozel_gunler(yillar, ek_metin):
 
 
 # ----------------------------------------------------------------------------
-# VERİ OKUMA VE BİRLEŞTİRME (2026 Satış Matrisi + Geçmiş Yıllar)
+# VERİ OKUMA VE BİRLEŞTİRME
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def tablo_oku(ad, ham):
@@ -147,16 +147,11 @@ def kaynak_bul(yuklenen, adaylar, anahtarlar, haric=()):
     return None, None
 
 
-def 2026_matris_isle(xls_obj):
-    # '2026 pasta satış.xlsx' formatı: Satır 0 tarihler, Sütun 0 ürün adları, Son satır Toplam Pasta Sayısı
+def matris_isle_2026(xls_obj):
     sheet_name = [s for s in xls_obj.sheet_names if "siparis" in _norm(s) or "satis" in _norm(s)]
     sheet_name = sheet_name[0] if sheet_name else xls_obj.sheet_names[0]
     df = xls_obj.parse(sheet_name, header=None)
     
-    # Satır 0 tarihler
-    tarihler = df.iloc[0, 1:].values
-    
-    # Ürün detayları için long format hazırlığı
     detay_rows = []
     gunluk_rows = []
     
@@ -177,7 +172,6 @@ def 2026_matris_isle(xls_obj):
                 continue
             
             if p_ad and p_ad.lower() != "nan":
-                # Çeşit ve Boy ayrıştırma (Örn: BÜYÜK TURTA ÇİKOLATALI)
                 boy = "Standart"
                 if "büyük" in _norm(p_ad): boy = "Büyük"
                 elif "orta" in _norm(p_ad): boy = "Orta"
@@ -195,7 +189,6 @@ def 2026_matris_isle(xls_obj):
 
 
 def gecmis_veri_oku():
-    # 'geçmiş yıllar data.xlsx' içindeki 2024, 2025 gibi sayfaları okur
     bulunan = [f for f in GECMIS_DOSYALAR if os.path.exists(f)]
     if not bulunan:
         return pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
@@ -448,8 +441,7 @@ def uygulama():
             menu_tarihi = pd.Timestamp(st.date_input("Yeni menünün başlangıcı", value=BUGUN - dt.timedelta(days=60)))
         ek_ozel = st.text_area("Ek özel günler (her satıra YYYY-AA-GG)", height=60)
 
-    # Verileri birleştirme (Geçmiş yıllar + 2026 satışları + eklenenler)
-    gecmis_df = gecmis_gecmis = gecmis_veri_oku()
+    gecmis_df = gecmis_veri_oku()
     
     ad, ham = kaynak_bul(None, GUNLUK_DOSYALAR, ("2026", "satis", "pasta"))
     gunluk_2026 = pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
@@ -458,13 +450,12 @@ def uygulama():
     if ad is not None:
         try:
             xls_obj = tablo_oku(ad, ham)
-            gunluk_2026, detay_2026 = 2026_matris_isle(xls_obj)
+            gunluk_2026, detay_2026 = matris_isle_2026(xls_obj)
         except Exception as e:
             st.error(f"2026 satış dosyası okunamadı: {e}")
             
     eklenen = eklenen_oku()
     
-    # Tüm verileri birleştir
     tum_veri_listesi = [gecmis_df, gunluk_2026, eklenen]
     veri = pd.concat([df for df in tum_veri_listesi if not df.empty]).drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
 
@@ -474,7 +465,6 @@ def uygulama():
 
     veri["Y"] = veri["Adet"] * np.where(veri["Bitti"], 1 + bitti_duzeltme / 100.0, 1.0)
 
-    # Hava durumu
     hava = None
     if hava_kullan:
         hava = hava_getir(round(lat, 2), round(lon, 2), veri["Tarih"].min().date().isoformat(),
