@@ -26,6 +26,7 @@ GUNLUK_DOSYALAR = ["2026 pasta satış.xlsx", "gunluk_satis.xlsx", "gunluk_satis
 DETAY_DOSYALAR = ["2026 pasta satış.xlsx", "urun_detay.xlsx", "urun_detay.csv"]
 GECMIS_DOSYALAR = ["geçmiş yıllar data.xlsx", "gecmis_arsiv.xlsx"]
 EKLENEN_DOSYA = "eklenen_gunluk.csv"
+DETAY_EKLENEN_DOSYA = "eklenen_detay.csv"
 
 GUN_TR = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
@@ -222,7 +223,22 @@ def gecmis_veri_oku():
     return pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
 
 
-def eklenen_oku():
+def eklenen_detay_oku():
+    if os.path.exists(DETAY_EKLENEN_DOSYA):
+        try:
+            return pd.read_csv(DETAY_EKLENEN_DOSYA, parse_dates=["Tarih"])
+        except Exception:
+            pass
+    return pd.DataFrame(columns=["Tarih", "Cesit", "Adet"])
+
+
+def eklenen_gunluk_oku():
+    detaylar = eklenen_detay_oku()
+    if not detaylar.empty:
+        g = detaylar.groupby("Tarih")["Adet"].sum().reset_index()
+        g["Bitti"] = False
+        g["Not"] = "Uygulamadan girildi"
+        return g
     if os.path.exists(EKLENEN_DOSYA):
         try:
             e = pd.read_csv(EKLENEN_DOSYA)
@@ -382,7 +398,7 @@ def aciklama(mod, xr):
 
 
 # ----------------------------------------------------------------------------
-# ÜRÜN DAĞILIMI (Sadeleştirilmiş: Çeşit ve Toplam Adet)
+# ÜRÜN DAĞILIMI
 # ----------------------------------------------------------------------------
 def yuvarla_topla(degerler, toplam):
     taban = np.floor(degerler).astype(int)
@@ -450,13 +466,17 @@ def uygulama():
         except Exception as e:
             st.error(f"2026 satış dosyası okunamadı: {e}")
             
-    eklenen = eklenen_oku()
+    ek_gunluk = eklenen_gunluk_oku()
+    ek_detay = eklenen_detay_oku()
     
-    tum_veri_listesi = [gecmis_df, gunluk_2026, eklenen]
+    if not ek_detay.empty:
+        detay_2026 = pd.concat([detay_2026, ek_detay]).drop_duplicates(["Tarih", "Cesit"], keep="last")
+        
+    tum_veri_listesi = [gecmis_df, gunluk_2026, ek_gunluk]
     veri = pd.concat([df for df in tum_veri_listesi if not df.empty]).drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
 
     if len(veri) < 28:
-        st.error(f"En az 28 günlük veri gerekli, şu an {len(veri)} gün var. Lütfen '2026 pasta satış.xlsx' ve 'geçmiş yıllar data.xlsx' dosyalarının klasörde olduğundan emin olun.")
+        st.error(f"En az 28 günlük veri gerekli, şu an {len(veri)} gün var. Lütfen '2026 pasta satış.xlsx' dosyasının klasörde olduğundan emin olun.")
         return
 
     veri["Y"] = veri["Adet"] * np.where(veri["Bitti"], 1 + bitti_duzeltme / 100.0, 1.0)
@@ -489,7 +509,7 @@ def uygulama():
     mod = None
     yontem = "Baz"
     if test is not None:
-        yontem = min(test["mape"], key=test["mape"].get)
+        yontem = min(test["mape"], key=test["mape].get)
         mod = fit_model(X, np.log(veri["Y"].to_numpy(float)), test["alpha"])
 
     def hava_degeri(tarih):
@@ -507,7 +527,7 @@ def uygulama():
         oran = test["bt"]["Gercek"] / test["bt"][yontem]
         return float(np.quantile(oran, seviye)), True
 
-    tab1, tab2, tab3, tab4 = st.tabs(["🚀 Üretim Planı", "📈 Model Performansı", "📝 Günlük Giriş", "📂 Veri Arşivi"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🚀 Üretim Planı", "📈 Model Performansı", "📝 Çeşit Bazlı Günlük Giriş", "📂 Veri Arşivi"])
 
     with tab1:
         c1, c2 = st.columns([1, 2])
@@ -539,13 +559,28 @@ def uygulama():
             else:
                 m3.metric("Olası aralık", "hesaplanamadı")
             
-            st.markdown(f"Yöntem: **{YONTEM_AD[yontem]}**. Toplam veri havuzu: **{len(veri)} gün** (Geçmiş yıllar ve 2026 verileri aktif).")
+            # --- DETAYLI TAHMİN AÇIKLAMA RAPORU ---
+            st.markdown("### 🧠 Akıllı Tahmin ve Karşılaştırma Analitiği")
+            st.markdown(f"* **Kullanılan Yöntem:** `{YONTEM_AD[yontem]}` (Geçmiş veriler üzerinde yapılan geriye dönük testlerde en düşük hata oranını veren yöntem seçilmiştir).")
+            st.markdown(f"* **Veri Havuzu Temeli:** Model, geçmiş yılların arşivleri ve 2026 dönemi dahil toplam **{len(veri)} günlük** gerçekleşen satış verisini taramaktadır.")
+            
+            # Baz çizgi ve model karşılaştırması
+            st.markdown(f"* **Baz Çizgi (Son 6 {GUN_TR[hedef.dayofweek]} Ortalaması):** `{int(round(baz_t))}` adet")
+            if mod is not None:
+                st.markdown(f"* **İstatistiksel Regresyon Modeli:** `{int(round(model_t))}` adet")
+            
+            if olculu:
+                mape_val = test['mape'][yontem] * 100
+                st.markdown(f"* **Güvenlik Çarpanı & Hata Payı:** Modelin geçmiş testlerdeki ortalama yüzde hatası (MAPE) **%{mape_val:.1f}** olarak ölçülmüştür. Seçilen güvenlik seviyesi (`{seviye_ad}`) ile bu hata payı dengelenerek son üretim adedine ulaşılmıştır.")
 
             if mod is not None:
-                st.markdown("**Neden bu tahmin?**")
+                st.markdown("**Neden Bu Talep Bekleniyor? (Etken Faktörler):**")
                 etki = aciklama(mod, xr)
-                for grup, pct in etki[:3]:
-                    st.markdown(f"- {grup}: **{pct:+.0f}%**")
+                if etki:
+                    for grup, pct in etki[:4]:
+                        st.markdown(f"  - {grup}: **{pct:+.0f}%** etki")
+                else:
+                    st.markdown("  - Belirgin ekstrem bir etken yok, tipik sezon ortalaması.")
 
         st.markdown("### 📋 Çeşit Dağılımı")
         if detay_2026 is None or detay_2026.empty:
@@ -579,19 +614,47 @@ def uygulama():
             st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
     with tab3:
-        st.subheader("Günlük Satış Girişi")
-        with st.form("giris", clear_on_submit=True):
-            g_tarih = st.date_input("Üretim/Satış Tarihi", value=BUGUN)
-            g_adet = st.number_input("Toplam satış adedi", min_value=0, step=1)
-            g_bitti = st.checkbox("Ürün tükendi")
-            g_not = st.text_input("Not")
-            kaydet = st.form_submit_button("Kaydet")
-        if kaydet and g_adet > 0:
-            yeni = pd.DataFrame({"Tarih": [pd.Timestamp(g_tarih)], "Adet": [int(g_adet)], "Bitti": [bool(g_bitti)], "Not": [g_not]})
-            birlesik = pd.concat([eklenen_oku(), yeni]).drop_duplicates("Tarih", keep="last")
-            birlesik.to_csv(EKLENEN_DOSYA, index=False)
-            st.success("Kaydedildi!")
-            st.rerun()
+        st.subheader("📝 Çeşit Bazlı Günlük Satış Girişi")
+        st.caption("Her akşam o gün üretilen/satılan çeşitleri adet bazında girin. Bu veriler gelecekteki tahminleri ve ürün dağılımını besleyecektir.")
+        
+        # Referans ürün listesini bulalım
+        ornek_urunler = []
+        if detay_2026 is not None and not detay_2026.empty:
+            ornek_urunler = sorted(detay_2026["Cesit"].unique().tolist())
+        else:
+            ornek_urunler = ["BATON ÇİKOLATALI", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA ÇİLEK OREO)", "BÜYÜK TURTA ÇİKOLATALI (ÇİKOLATA MUZLU)"]
+
+        with st.form("detay_giris_form"):
+            g_tarih = st.date_input("Satış Tarihi", value=BUGUN)
+            st.markdown("---")
+            
+            girilen_degerler = {}
+            # İki sütunlu şık bir form yapısı
+            cols = st.columns(2)
+            for idx, urun in enumerate(ornek_urunler):
+                col_target = cols[idx % 2]
+                girilen_degerler[urun] = col_target.number_input(f"{urun}", min_value=0, value=0, step=1, key=f"inp_{urun}")
+                
+            st.markdown("---")
+            kaydet_detay = st.form_submit_button("💾 Çeşit Bazlı Satışları Kaydet")
+            
+        if kaydet_detay:
+            yeni_satirlar = []
+            toplam_adet_hesap = 0
+            for urun, adet in girilen_degerler.items():
+                if adet > 0:
+                    yeni_satirlar.append({"Tarih": pd.Timestamp(g_tarih), "Cesit": urun, "Adet": adet})
+                    toplam_adet_hesap += adet
+                    
+            if toplam_adet_hesap > 0:
+                yeni_df = pd.DataFrame(yeni_satirlar)
+                mevcut_detay = eklenen_detay_oku()
+                birlesik_detay = pd.concat([mevcut_detay, yeni_df]).drop_duplicates(["Tarih", "Cesit"], keep="last")
+                birlesik_detay.to_csv(DETAY_EKLENEN_DOSYA, index=False)
+                st.success(f"✅ {g_tarih:%d.%m.%Y} tarihli satışlar başarıyla kaydedildi! Toplam Satış: {toplam_adet_hesap} adet.")
+                st.rerun()
+            else:
+                st.warning("Lütfen en az bir ürün için 0'dan büyük adet girin.")
 
     with tab4:
         st.subheader("Birleştirilmiş Veri Havuzu")
