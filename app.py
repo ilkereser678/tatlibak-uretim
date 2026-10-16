@@ -153,7 +153,6 @@ def matris_isle_2026(df):
     detay_rows = []
     gunluk_rows = []
     
-    # 2026 pasta satış dosyasında tarihler 1. satırda yer alır
     for col_idx in range(1, df.shape[1]):
         t = pd.to_datetime(df.iloc[1, col_idx], errors="coerce")
         if pd.isna(t):
@@ -171,13 +170,7 @@ def matris_isle_2026(df):
                 continue
             
             if p_ad and p_ad.lower() != "nan" and p_ad != "":
-                boy = "Standart"
-                if "büyük" in _norm(p_ad): boy = "Büyük"
-                elif "orta" in _norm(p_ad): boy = "Orta"
-                elif "sıfır" in _norm(p_ad) or "sifir" in _norm(p_ad): boy = "Küçük"
-                elif "baton" in _norm(p_ad): boy = "Baton"
-                
-                detay_rows.append({"Tarih": t, "Cesit": p_ad, "Boy": boy, "Adet": val})
+                detay_rows.append({"Tarih": t, "Cesit": p_ad, "Adet": val})
                 gunluk_toplam += val
                 
         gunluk_rows.append({"Tarih": t, "Adet": gunluk_toplam, "Bitti": False, "Not": ""})
@@ -383,13 +376,13 @@ def aciklama(mod, xr):
     for grup, cols in GRUPLAR.items():
         c = katki[[x for x in cols if x in katki.index]].sum()
         pct = (np.exp(c) - 1) * 100
-        if abs(pct) >= 1:
+        if abs(pct >= 1):
             satirlar.append((grup, float(pct)))
     return sorted(satirlar, key=lambda s: -abs(s[1]))
 
 
 # ----------------------------------------------------------------------------
-# ÜRÜN DAĞILIMI
+# ÜRÜN DAĞILIMI (Sadeleştirilmiş: Çeşit ve Toplam Adet)
 # ----------------------------------------------------------------------------
 def yuvarla_topla(degerler, toplam):
     taban = np.floor(degerler).astype(int)
@@ -400,7 +393,7 @@ def yuvarla_topla(degerler, toplam):
     return taban
 
 
-def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0, k_boy=100.0):
+def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0):
     if detay is None or detay.empty:
         return pd.DataFrame(), "Veri yok"
     son = detay["Tarih"].max()
@@ -408,28 +401,20 @@ def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0, k_boy=100.0):
     hs = hedef.dayofweek >= 4
     maske = d["Tarih"].dt.dayofweek.ge(4) == hs
     cesitler = list(pd.unique(d["Cesit"]))
-    boylar = list(pd.unique(d["Boy"]))
 
     genel = d.groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
     genel_pay = genel / (genel.sum() if genel.sum() > 0 else 1)
     g = d[maske].groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
     cesit_pay = (g + k_cesit * genel_pay) / (g.sum() + k_cesit)
 
-    pay = np.zeros((len(cesitler), len(boylar)))
-    for i, c in enumerate(cesitler):
-        dc = d[d["Cesit"] == c]
-        gb = dc.groupby("Boy")["Adet"].sum().reindex(boylar).fillna(0)
-        gb_pay = gb / gb.sum() if gb.sum() > 0 else pd.Series(1 / len(boylar), index=boylar)
-        gh = dc[dc["Tarih"].dt.dayofweek.ge(4) == hs].groupby("Boy")["Adet"].sum().reindex(boylar).fillna(0)
-        boy_pay = (gh + k_boy * gb_pay) / (gh.sum() + k_boy)
-        pay[i, :] = cesit_pay[c] * boy_pay.to_numpy()
-    if pay.sum() > 0:
-        pay = pay / pay.sum()
-    sonuc = yuvarla_topla((pay * toplam).ravel(), toplam).reshape(pay.shape)
-    tablo = pd.DataFrame(sonuc, index=cesitler, columns=boylar)
-    tablo["Toplam"] = tablo.sum(axis=1)
+    if cesit_pay.sum() > 0:
+        cesit_pay = cesit_pay / cesit_pay.sum()
+        
+    sonuc = yuvarla_topla((cesit_pay * toplam).ravel(), toplam)
+    
+    tablo = pd.DataFrame({"Önerilen Üretim (Adet)": sonuc}, index=cesitler)
     tablo.loc["TOPLAM"] = tablo.sum()
-    tablo.index.name = "Çeşit"
+    tablo.index.name = "Ürün Çeşidi / Boy"
     return tablo.astype(int), ("Cuma-Pazar" if hs else "Pazartesi-Perşembe")
 
 
@@ -562,12 +547,13 @@ def uygulama():
                 for grup, pct in etki[:3]:
                     st.markdown(f"- {grup}: **{pct:+.0f}%**")
 
-        st.markdown("### 📋 Çeşit / Boy Dağılımı")
+        st.markdown("### 📋 Çeşit Dağılımı")
         if detay_2026 is None or detay_2026.empty:
             st.info("Detay ürün dağılımı için '2026 pasta satış.xlsx' dosyası kullanılıyor.")
         else:
             tablo, grup_ad = urun_dagilimi(detay_2026, hedef, uretim, pencere)
-            st.dataframe(tablo)
+            st.dataframe(tablo, use_container_width=True)
+            st.caption(f"Pay dağılımı son {pencere} günlük satışlardan ({grup_ad} günleri) hesaplanmıştır. Toplam = {uretim} adet.")
 
         st.markdown("### 🗓️ Önümüzdeki 7 gün")
         satirlar = []
