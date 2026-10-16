@@ -13,7 +13,6 @@ import streamlit as st
 
 try:
     from zoneinfo import ZoneInfo
-
     BUGUN = dt.datetime.now(ZoneInfo("Europe/Istanbul")).date()
 except Exception:
     BUGUN = dt.date.today()
@@ -21,15 +20,15 @@ except Exception:
 st.set_page_config(page_title="Tatlıbak Üretim Planlama", page_icon="🍰", layout="wide")
 
 # ----------------------------------------------------------------------------
-# AYARLAR
+# AYARLAR VE DOSYA İSİMLERİ
 # ----------------------------------------------------------------------------
-GUNLUK_DOSYALAR = ["gunluk_satis.xlsx", "gunluk_satis.csv"]
-DETAY_DOSYALAR = ["urun_detay.xlsx", "urun_detay.csv"]
-EKLENEN_DOSYA = "eklenen_gunluk.csv"  # uygulamadan girilen günlük satışlar
+GUNLUK_DOSYALAR = ["2026 pasta satış.xlsx", "gunluk_satis.xlsx", "gunluk_satis.csv"]
+DETAY_DOSYALAR = ["2026 pasta satış.xlsx", "urun_detay.xlsx", "urun_detay.csv"]
+GECMIS_DOSYALAR = ["geçmiş yıllar data.xlsx", "gecmis_arsiv.xlsx"]
+EKLENEN_DOSYA = "eklenen_gunluk.csv"
 
 GUN_TR = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# Dini bayramlar (başlangıç, bitiş - dahil). Yeni yıl için buraya ekleyin.
 BAYRAMLAR = [
     ("2023-04-21", "2023-04-23"), ("2023-06-28", "2023-07-01"),
     ("2024-04-10", "2024-04-12"), ("2024-06-16", "2024-06-19"),
@@ -100,15 +99,15 @@ def ozel_gunler(yillar, ek_metin):
         bs, be = dt.date.fromisoformat(b), dt.date.fromisoformat(e)
         for i in range((be - bs).days + 1):
             bayram.add(bs + dt.timedelta(days=i))
-        for i in range(1, 4):  # arife dahil bayramdan önceki 3 gün
+        for i in range(1, 4):
             oncesi.add(bs - dt.timedelta(days=i))
     for y in yillar:
         for m, g in [(1, 1), (4, 23), (5, 1), (5, 19), (7, 15), (8, 30), (10, 29)]:
             resmi.add(dt.date(y, m, g))
         for m, g in [(2, 14), (3, 8), (11, 24), (12, 31)]:
-            ozel.add(dt.date(y, m, g))  # Sevgililer, Kadınlar, Öğretmenler, Yılbaşı arifesi
-        ozel.add(nth_weekday(y, 5, 6, 2))  # Anneler Günü
-        ozel.add(nth_weekday(y, 6, 6, 3))  # Babalar Günü
+            ozel.add(dt.date(y, m, g))
+        ozel.add(nth_weekday(y, 5, 6, 2))
+        ozel.add(nth_weekday(y, 6, 6, 3))
     for satir in (ek_metin or "").splitlines():
         try:
             ozel.add(dt.date.fromisoformat(satir.strip()))
@@ -118,7 +117,7 @@ def ozel_gunler(yillar, ek_metin):
 
 
 # ----------------------------------------------------------------------------
-# VERİ OKUMA
+# VERİ OKUMA VE BİRLEŞTİRME (2026 Satış Matrisi + Geçmiş Yıllar)
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def tablo_oku(ad, ham):
@@ -130,11 +129,10 @@ def tablo_oku(ad, ham):
                 continue
         raise ValueError("CSV okunamadı")
     xls = pd.ExcelFile(io.BytesIO(ham))
-    return xls.parse(xls.sheet_names[0])
+    return xls
 
 
 def kaynak_bul(yuklenen, adaylar, anahtarlar, haric=()):
-    """Yüklenen dosya > tam isim eşleşmesi > klasördeki benzer isimli dosya."""
     if yuklenen is not None:
         return yuklenen.name, yuklenen.getvalue()
     bulunan = [f for f in adaylar if os.path.exists(f)]
@@ -149,62 +147,82 @@ def kaynak_bul(yuklenen, adaylar, anahtarlar, haric=()):
     return None, None
 
 
-def gunluk_hazirla(ham):
-    n = {c: _norm(c) for c in ham.columns}
-    tarih_c = next((c for c, x in n.items() if "tarih" in x), ham.columns[0])
-    bitti_c = next((c for c, x in n.items() if "bitti" in x or "tukendi" in x), None)
-    not_c = next((c for c, x in n.items() if x.startswith("not") or "aciklama" in x), None)
-    dis = {tarih_c, bitti_c, not_c}
-    top_c = next(
-        (c for c, x in n.items() if c not in dis and any(k in x for k in ("toplam", "adet", "satis"))),
-        None,
-    )
-    if top_c is None:
-        aday = [c for c in ham.columns if c not in dis]
-        if not aday:
-            raise ValueError(f"Toplam adet sütunu bulunamadı. Bulunan sütunlar: {list(ham.columns)}")
-        top_c = aday[0]
-    out = pd.DataFrame({
-        "Tarih": _tarih(ham[tarih_c]),
-        "Adet": ham[top_c].map(_sayi),
-        "Bitti": ham[bitti_c].map(_evet) if bitti_c else False,
-        "Not": ham[not_c].fillna("").astype(str) if not_c else "",
-    })
-    out = out.dropna(subset=["Tarih", "Adet"])
-    out = out[out["Adet"] > 0]
-    out["Bitti"] = out["Bitti"].astype(bool)
-    if out.empty:
-        raise ValueError(
-            "Geçerli satır bulunamadı. Tarih ve adet sütunlarını kontrol edin. "
-            f"Bulunan sütunlar: {list(ham.columns)}"
-        )
-    return out.drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
+def 2026_matris_isle(xls_obj):
+    # '2026 pasta satış.xlsx' formatı: Satır 0 tarihler, Sütun 0 ürün adları, Son satır Toplam Pasta Sayısı
+    sheet_name = [s for s in xls_obj.sheet_names if "siparis" in _norm(s) or "satis" in _norm(s)]
+    sheet_name = sheet_name[0] if sheet_name else xls_obj.sheet_names[0]
+    df = xls_obj.parse(sheet_name, header=None)
+    
+    # Satır 0 tarihler
+    tarihler = df.iloc[0, 1:].values
+    
+    # Ürün detayları için long format hazırlığı
+    detay_rows = []
+    gunluk_rows = []
+    
+    for col_idx in range(1, df.shape[1]):
+        t = pd.to_datetime(df.iloc[0, col_idx], errors="coerce")
+        if pd.isna(t):
+            continue
+        
+        gunluk_toplam = 0
+        for row_idx in range(1, df.shape[0]):
+            p_ad = str(df.iloc[row_idx, 0]).strip()
+            val = _sayi(df.iloc[row_idx, col_idx])
+            if pd.isna(val) or val < 0:
+                val = 0
+            
+            if "toplam" in _norm(p_ad):
+                gunluk_toplam = val
+                continue
+            
+            if p_ad and p_ad.lower() != "nan":
+                # Çeşit ve Boy ayrıştırma (Örn: BÜYÜK TURTA ÇİKOLATALI)
+                boy = "Standart"
+                if "büyük" in _norm(p_ad): boy = "Büyük"
+                elif "orta" in _norm(p_ad): boy = "Orta"
+                elif "sıfır" in _norm(p_ad) or "sifir" in _norm(p_ad): boy = "Küçük"
+                elif "baton" in _norm(p_ad): boy = "Baton"
+                
+                detay_rows.append({"Tarih": t, "Cesit": p_ad, "Boy": boy, "Adet": val})
+                gunluk_toplam += val
+                
+        gunluk_rows.append({"Tarih": t, "Adet": gunluk_toplam, "Bitti": False, "Not": ""})
+        
+    df_gunluk = pd.DataFrame(gunluk_rows).dropna(subset=["Tarih", "Adet"])
+    df_detay = pd.DataFrame(detay_rows).dropna(subset=["Tarih", "Adet"])
+    return df_gunluk, df_detay
 
 
-def detay_hazirla(ham):
-    n = {c: _norm(c) for c in ham.columns}
-    tarih_c = next((c for c, x in n.items() if "tarih" in x), ham.columns[0])
-    boy_c = next((c for c, x in n.items() if "boy" in x), None)
-    adet_c = next((c for c, x in n.items() if "adet" in x), None)
-    cesit_c = next(
-        (c for c, x in n.items() if c not in (tarih_c, boy_c, adet_c) and any(k in x for k in ("cesit", "urun", "pasta"))),
-        None,
-    )
-    if None in (boy_c, adet_c, cesit_c):
-        raise ValueError(
-            "Ürün detay dosyasında Tarih, Çeşit, Boy, Adet sütunları bulunamadı. "
-            f"Bulunan sütunlar: {list(ham.columns)}"
-        )
-    out = pd.DataFrame({
-        "Tarih": _tarih(ham[tarih_c]),
-        "Cesit": ham[cesit_c].astype(str).str.strip(),
-        "Boy": ham[boy_c].astype(str).str.strip(),
-        "Adet": ham[adet_c].map(_sayi),
-    }).dropna()
-    out = out[out["Adet"] > 0].reset_index(drop=True)
-    if out.empty:
-        raise ValueError("Ürün detay dosyasında geçerli satır yok.")
-    return out
+def gecmis_veri_oku():
+    # 'geçmiş yıllar data.xlsx' içindeki 2024, 2025 gibi sayfaları okur
+    bulunan = [f for f in GECMIS_DOSYALAR if os.path.exists(f)]
+    if not bulunan:
+        return pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
+    
+    tum_gecmis = []
+    for dosya in bulunan:
+        try:
+            xls = pd.ExcelFile(dosya)
+            for sheet in xls.sheet_names:
+                df = xls.parse(sheet)
+                n = {c: _norm(c) for c in df.columns}
+                t_c = next((c for c, x in n.items() if "tarih" in x), df.columns[0])
+                a_c = next((c for c, x in n.items() if "adet" in x or "toplam" in x), df.columns[1])
+                
+                temp = pd.DataFrame({
+                    "Tarih": _tarih(df[t_c]),
+                    "Adet": df[a_c].map(_sayi),
+                    "Bitti": False,
+                    "Not": f"Arşiv ({sheet})"
+                }).dropna(subset=["Tarih", "Adet"])
+                tum_gecmis.append(temp)
+        except Exception:
+            pass
+            
+    if tum_gecmis:
+        return pd.concat(tum_gecmis).drop_duplicates("Tarih", keep="last")
+    return pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
 
 
 def eklenen_oku():
@@ -222,36 +240,7 @@ def eklenen_oku():
 
 
 # ----------------------------------------------------------------------------
-# ÖRNEK VERİ VE ŞABLON (dosyanız hazır değilken uygulamayı denemek için)
-# ----------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def ornek_veri():
-    rng = np.random.default_rng(7)
-    gunler = pd.date_range(BUGUN - dt.timedelta(days=730), BUGUN - dt.timedelta(days=1))
-    dow = np.array([0.95, 0.95, 1.0, 1.0, 1.1, 1.2, 1.1])
-    y, bitti = [], []
-    for d in gunler:
-        v = 1300 * dow[d.dayofweek] * (1.05 if d.month in (11, 12, 1, 2) else 0.95)
-        v *= 1.06 if 10 <= d.day <= 15 else 1.0
-        y.append(int(v * rng.normal(1, 0.07)))
-        bitti.append("Evet" if rng.random() < 0.08 else "Hayır")
-    g = pd.DataFrame({"Tarih": gunler, "Toplam Adet": y, "Ürün Bitti mi": bitti, "Not": ""})
-    satir = []
-    for d in gunler[-60:]:
-        for c in ["Fıstıklı", "Çikolatalı", "Meyveli", "Frambuazlı", "Karamelli", "Muzlu", "Limonlu", "Kakaolu"]:
-            for b, s in zip(["Küçük", "Orta", "Büyük"], [0.5, 0.35, 0.15]):
-                satir.append([d, c, b, int(rng.integers(2, 12) * s * 3) + 1])
-    return g, pd.DataFrame(satir, columns=["Tarih", "Çeşit", "Boy", "Adet"])
-
-
-def sablon_xlsx(df):
-    b = io.BytesIO()
-    df.to_excel(b, index=False)
-    return b.getvalue()
-
-
-# ----------------------------------------------------------------------------
-# HAVA DURUMU (Open-Meteo, ücretsiz, anahtar gerektirmez)
+# HAVA DURUMU (Open-Meteo)
 # ----------------------------------------------------------------------------
 def _hava_df(js):
     g = js["daily"]
@@ -290,7 +279,7 @@ def hava_getir(lat, lon, bas_iso, bit_iso):
 
 
 # ----------------------------------------------------------------------------
-# ÖZELLİKLER VE MODEL (yalnız numpy; ek kütüphane gerekmez)
+# ÖZELLİKLER VE MODEL (Ridge Regresyon)
 # ----------------------------------------------------------------------------
 def ozellik_olustur(df, cfg):
     d = pd.to_datetime(df["Tarih"])
@@ -319,7 +308,7 @@ def ozellik_olustur(df, cfg):
     return X
 
 
-def fit_model(X, y_log, alpha):
+def fit_model(X, y_log, alpha=10.0):
     mu = X.mean()
     sd = X.std(ddof=0)
     sd = sd.where(sd > 1e-9, 1.0)
@@ -337,7 +326,6 @@ def predict_model(mod, X):
 
 
 def baz_cizgi(v, hedef):
-    """Aynı gün tipinin son 6 değerinin ortalaması."""
     gecmis = v[v["Tarih"] < hedef]
     ayni = gecmis[gecmis["Tarih"].dt.dayofweek == hedef.dayofweek].tail(6)["Y"]
     if len(ayni) >= 3:
@@ -408,16 +396,18 @@ def yuvarla_topla(degerler, toplam):
     return taban
 
 
-def urun_dagilimi(detay, hedef, toplam, pencere, k_cesit=300.0, k_boy=100.0):
+def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0, k_boy=100.0):
+    if detay is None or detay.empty:
+        return pd.DataFrame(), "Veri yok"
     son = detay["Tarih"].max()
     d = detay[detay["Tarih"] > son - pd.Timedelta(days=pencere)]
-    hs = hedef.dayofweek >= 4  # Cuma-Cumartesi-Pazar grubu
+    hs = hedef.dayofweek >= 4
     maske = d["Tarih"].dt.dayofweek.ge(4) == hs
     cesitler = list(pd.unique(d["Cesit"]))
     boylar = list(pd.unique(d["Boy"]))
 
-    genel = d.groupby("Cesit")["Adet"].sum().reindex(cesitler)
-    genel_pay = genel / genel.sum()
+    genel = d.groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
+    genel_pay = genel / (genel.sum() if genel.sum() > 0 else 1)
     g = d[maske].groupby("Cesit")["Adet"].sum().reindex(cesitler).fillna(0)
     cesit_pay = (g + k_cesit * genel_pay) / (g.sum() + k_cesit)
 
@@ -429,7 +419,8 @@ def urun_dagilimi(detay, hedef, toplam, pencere, k_cesit=300.0, k_boy=100.0):
         gh = dc[dc["Tarih"].dt.dayofweek.ge(4) == hs].groupby("Boy")["Adet"].sum().reindex(boylar).fillna(0)
         boy_pay = (gh + k_boy * gb_pay) / (gh.sum() + k_boy)
         pay[i, :] = cesit_pay[c] * boy_pay.to_numpy()
-    pay = pay / pay.sum()
+    if pay.sum() > 0:
+        pay = pay / pay.sum()
     sonuc = yuvarla_topla((pay * toplam).ravel(), toplam).reshape(pay.shape)
     tablo = pd.DataFrame(sonuc, index=cesitler, columns=boylar)
     tablo["Toplam"] = tablo.sum(axis=1)
@@ -439,88 +430,48 @@ def urun_dagilimi(detay, hedef, toplam, pencere, k_cesit=300.0, k_boy=100.0):
 
 
 # ----------------------------------------------------------------------------
-# UYGULAMA
+# UYGULAMA ARAYÜZÜ (STREAMLIT)
 # ----------------------------------------------------------------------------
 def uygulama():
-    st.title("🍰 Tatlıbak Yaş Pasta - Üretim Planlama")
+    st.title("🍰 Tatlıbak Yaş Pasta - Akıllı Üretim Planlama Motoru")
 
-    # ---------------- Yan menü ----------------
     with st.sidebar:
-        st.header("⚙️ Ayarlar")
-        ornek = st.checkbox("Örnek veriyle dene (gerçek veri değil)", value=False,
-                            help="Kendi dosyalarınız hazır değilken uygulamayı denemek içindir.")
-        st.caption("Veri dosyaları (isteğe bağlı; yüklenmezse GitHub'daki dosyalar okunur)")
-        yuk_gunluk = st.file_uploader("Günlük toplam satış (xlsx/csv)", type=["xlsx", "csv"], key="u1")
-        yuk_detay = st.file_uploader("Ürün detay (xlsx/csv)", type=["xlsx", "csv"], key="u2")
-        st.markdown("---")
-        lat = st.number_input("Enlem", value=41.01, format="%.2f", help="Firmanızın bulunduğu şehir. Varsayılan: İstanbul")
+        st.header("⚙️ Ayarlar & Veri")
+        lat = st.number_input("Enlem", value=41.01, format="%.2f")
         lon = st.number_input("Boylam", value=28.97, format="%.2f")
         hava_kullan = st.checkbox("Hava durumunu modele kat", value=True)
-        bitti_duzeltme = st.slider(
-            "Ürün biten günlerde talep düzeltmesi (%)", 0, 30, 10,
-            help="Ürün tükenen günün satışı gerçek talepten düşüktür. Bu günlerin değeri bu oranda yukarı çekilir.",
-        )
-        pencere = st.slider("Ürün dağılımı için geriye bakış (gün)", 30, 120, 60)
+        bitti_duzeltme = st.slider("Ürün biten günlerde talep düzeltmesi (%)", 0, 30, 10)
+        pencere = st.slider("Ürün dağılımı geriye bakış (gün)", 30, 120, 60)
         menu_var = st.checkbox("Menü değişikliği tarihini belirt")
         menu_tarihi = None
         if menu_var:
             menu_tarihi = pd.Timestamp(st.date_input("Yeni menünün başlangıcı", value=BUGUN - dt.timedelta(days=60)))
-        ek_ozel = st.text_area("Ek özel günler / kampanyalar (her satıra YYYY-AA-GG)", height=80)
-        with st.expander("Sorun giderme"):
-            st.write(f"Python {sys.version.split()[0]} | pandas {pd.__version__} | numpy {np.__version__} | streamlit {st.__version__}")
-            st.write("Klasördeki dosyalar:", sorted(glob.glob("*"))[:40])
+        ek_ozel = st.text_area("Ek özel günler (her satıra YYYY-AA-GG)", height=60)
 
-    # ---------------- Veriyi yükle ----------------
-    if ornek:
-        g_ham, d_ham = ornek_veri()
-        gunluk = gunluk_hazirla(g_ham)
-        detay = detay_hazirla(d_ham)
-        st.warning("ÖRNEK VERİ kullanılıyor. Sayılar gerçek değil, yalnız uygulamayı denemek içindir.")
-    else:
-        ad, ham = kaynak_bul(yuk_gunluk, GUNLUK_DOSYALAR, ("gunluk", "satis"), ("detay", "urun", "eklenen"))
-        if ad is None:
-            st.error("Günlük satış dosyası bulunamadı.")
-            st.markdown(
-                "GitHub'daki `app.py` ile **aynı klasöre** `gunluk_satis.xlsx` dosyasını ekleyin "
-                "ya da soldan yükleyin. Gerekli sütunlar: **Tarih | Toplam Adet | Ürün Bitti mi | Not** "
-                "(son ikisi isteğe bağlı).\n\n"
-                "Dosyanız hazır değilse soldaki **Örnek veriyle dene** kutusunu işaretleyin."
-            )
-            c1, c2 = st.columns(2)
-            g_ham, d_ham = ornek_veri()
-            c1.download_button(
-                "⬇️ Günlük satış şablonu (xlsx)",
-                sablon_xlsx(g_ham.head(5).assign(Tarih=lambda x: x["Tarih"].dt.strftime("%Y-%m-%d"))),
-                file_name="gunluk_satis_sablon.xlsx",
-            )
-            c2.download_button(
-                "⬇️ Ürün detay şablonu (xlsx)",
-                sablon_xlsx(d_ham.head(5).assign(Tarih=lambda x: x["Tarih"].dt.strftime("%Y-%m-%d"))),
-                file_name="urun_detay_sablon.xlsx",
-            )
-            return
+    # Verileri birleştirme (Geçmiş yıllar + 2026 satışları + eklenenler)
+    gecmis_df = gecmis_gecmis = gecmis_veri_oku()
+    
+    ad, ham = kaynak_bul(None, GUNLUK_DOSYALAR, ("2026", "satis", "pasta"))
+    gunluk_2026 = pd.DataFrame(columns=["Tarih", "Adet", "Bitti", "Not"])
+    detay_2026 = None
+    
+    if ad is not None:
         try:
-            gunluk = gunluk_hazirla(tablo_oku(ad, ham))
-        except Exception as ex:
-            st.error(f"Günlük satış dosyası ({ad}) okunamadı: {ex}")
-            return
-        eklenen = eklenen_oku()
-        if len(eklenen):
-            gunluk = pd.concat([gunluk, eklenen]).drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
-        detay = None
-        dad, dham = kaynak_bul(yuk_detay, DETAY_DOSYALAR, ("detay", "urun"))
-        if dad is not None:
-            try:
-                detay = detay_hazirla(tablo_oku(dad, dham))
-            except Exception as ex:
-                st.sidebar.warning(f"Ürün detay dosyası ({dad}) okunamadı: {ex}")
-        st.caption(f"Okunan dosya: {ad}" + (f" | ürün detay: {dad}" if dad else ""))
+            xls_obj = tablo_oku(ad, ham)
+            gunluk_2026, detay_2026 = 2026_matris_isle(xls_obj)
+        except Exception as e:
+            st.error(f"2026 satış dosyası okunamadı: {e}")
+            
+    eklenen = eklenen_oku()
+    
+    # Tüm verileri birleştir
+    tum_veri_listesi = [gecmis_df, gunluk_2026, eklenen]
+    veri = pd.concat([df for df in tum_veri_listesi if not df.empty]).drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
 
-    if len(gunluk) < 28:
-        st.error(f"En az 28 günlük veri gerekli, şu an {len(gunluk)} gün var.")
+    if len(veri) < 28:
+        st.error(f"En az 28 günlük veri gerekli, şu an {len(veri)} gün var. Lütfen '2026 pasta satış.xlsx' ve 'geçmiş yıllar data.xlsx' dosyalarının klasörde olduğundan emin olun.")
         return
 
-    veri = gunluk.copy()
     veri["Y"] = veri["Adet"] * np.where(veri["Bitti"], 1 + bitti_duzeltme / 100.0, 1.0)
 
     # Hava durumu
@@ -529,7 +480,7 @@ def uygulama():
         hava = hava_getir(round(lat, 2), round(lon, 2), veri["Tarih"].min().date().isoformat(),
                           (BUGUN + dt.timedelta(days=16)).isoformat())
     use_weather = False
-    if hava is not None and veri["Tarih"].isin(hava["Tarih"]).mean() >= 0.8:
+    if hava is not None and veri["Tarih"].isin(hava["Tarih"]).mean() >= 0.7:
         veri = veri.merge(hava, on="Tarih", how="left")
         ay = veri["Tarih"].dt.month
         for c in ("sicaklik", "yagis"):
@@ -570,17 +521,14 @@ def uygulama():
         oran = test["bt"]["Gercek"] / test["bt"][yontem]
         return float(np.quantile(oran, seviye)), True
 
-    # ---------------- Sekmeler ----------------
-    tab1, tab2, tab3, tab4 = st.tabs(["🚀 Üretim Planı", "📈 Model Performansı", "📝 Günlük Giriş", "📂 Veri"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🚀 Üretim Planı", "📈 Model Performansı", "📝 Günlük Giriş", "📂 Veri Arşivi"])
 
-    # ---- Sekme 1: Plan ----
     with tab1:
         c1, c2 = st.columns([1, 2])
         with c1:
             hedef_d = st.date_input("Üretim tarihi", value=BUGUN + dt.timedelta(days=1))
             hedef = pd.Timestamp(hedef_d)
-            seviye_ad = st.selectbox("Güvenlik seviyesi", list(SEVIYELER), index=1,
-                                     help="Talebin üretimi aşma olasılığını belirler. Yüksek seviye = daha az kaçan satış, daha çok fire.")
+            seviye_ad = st.selectbox("Güvenlik seviyesi", list(SEVIYELER), index=1)
             seviye = SEVIYELER[seviye_ad]
             hava_elle = st.checkbox("Hava durumunu elle gir")
             sic, yag, hava_kaynak = hava_degeri(hedef)
@@ -588,7 +536,7 @@ def uygulama():
                 sic = st.slider("Sıcaklık (°C)", -5, 40, int(round(sic)))
                 yag = 5.0 if st.checkbox("Yağmurlu", value=yag >= 1) else 0.0
                 hava_kaynak = "elle"
-            st.info(f"{GUN_TR[hedef.dayofweek]} | Hava: {sic:.0f}°C, {'yağmurlu' if yag >= 1 else 'yağışsız'} ({hava_kaynak})")
+            st.info(f"{GUN_TR[hedef.dayofweek]} | Hava: {sic:.0f}°C ({hava_kaynak})")
 
         sec, model_t, baz_t, xr = tahmin_et(cfg, veri, mod, yontem, hedef, sic, yag)
         carpan, olculu = carpan_hesapla(seviye)
@@ -604,77 +552,21 @@ def uygulama():
                 m3.metric("Olası aralık (%80)", f"{int(round(lo))} - {int(round(hi))}")
             else:
                 m3.metric("Olası aralık", "hesaplanamadı")
-            aciklama_metni = (
-                f"Üretim = beklenen talep × {carpan:.2f} (geçmiş hatalardan ölçüldü)." if olculu
-                else "Yeterli test verisi yok; geçici olarak %10 pay eklendi."
-            )
-            st.caption(f"Yöntem: **{YONTEM_AD[yontem]}**. {aciklama_metni}")
-
-            ayni = veri[(veri["Tarih"] < hedef) & (veri["Tarih"].dt.dayofweek == hedef.dayofweek)].tail(6)
-            if len(ayni):
-                st.markdown(
-                    f"**Son {len(ayni)} {GUN_TR[hedef.dayofweek]}:** "
-                    + ", ".join(str(int(x)) for x in ayni["Adet"])
-                    + f"  (ortalama {int(round(ayni['Adet'].mean()))})"
-                )
+            
+            st.markdown(f"Yöntem: **{YONTEM_AD[yontem]}**. Toplam veri havuzu: **{len(veri)} gün** (2024, 2025 ve 2026 verileri aktif).")
 
             if mod is not None:
-                st.markdown("**Neden bu tahmin?** (ortalama güne göre etkiler)")
+                st.markdown("**Neden bu tahmin?**")
                 etki = aciklama(mod, xr)
-                if etki:
-                    for grup, pct in etki:
-                        st.markdown(f"- {grup}: **{pct:+.0f}%**")
-                else:
-                    st.markdown("- Belirgin bir etken yok, ortalama gün.")
-
-            st.markdown("### ⚠️ Uyarılar")
-            uyarilar = []
-            son_veri = veri["Tarih"].max()
-            bosluk = (hedef - son_veri).days
-            if bosluk > 2:
-                uyarilar.append(("warning", f"Son veri {son_veri:%d.%m.%Y}. Arada {bosluk - 1} gün girilmemiş, tahmin bayat olabilir."))
-            if test is None:
-                uyarilar.append(("info", f"Elinizde {len(veri)} günlük veri var. Model için en az ~135 gün gerekir; şimdilik yalnız baz çizgi kullanılıyor."))
-            else:
-                bt = test["bt"]
-                son28 = bt.tail(28)
-                m28 = mape(son28["Gercek"], son28[yontem])
-                if m28 > 0.15:
-                    uyarilar.append(("warning", f"Son 4 haftada ortalama hata %{m28 * 100:.0f}. Tahmine temkinli yaklaşın."))
-                b7 = float((bt.tail(7)["Gercek"] / bt.tail(7)[yontem]).mean())
-                if b7 > 1.10:
-                    uyarilar.append(("warning", f"Model son 7 günde ortalama %{(b7 - 1) * 100:.0f} düşük tahmin etti. Talep yükseliyor olabilir."))
-                elif b7 < 0.90:
-                    uyarilar.append(("warning", f"Model son 7 günde ortalama %{(1 - b7) * 100:.0f} yüksek tahmin etti. Talep düşüyor olabilir."))
-            bitti14 = veri.tail(14)["Bitti"].mean()
-            if bitti14 > 0.2:
-                uyarilar.append(("warning", f"Son 14 günün %{bitti14 * 100:.0f}'inde ürün tükenmiş. Güvenlik seviyesini yükseltmeyi düşünün."))
-            if baz_t > 0 and abs(sec / baz_t - 1) > 0.25:
-                uyarilar.append(("warning", f"Tahmin, son haftaların aynı gün ortalamasından %{abs(sec / baz_t - 1) * 100:.0f} farklı. Takvim/hava etkisini kontrol edin."))
-            if sec > veri["Adet"].max():
-                uyarilar.append(("info", "Tahmin, geçmişteki en yüksek günün üzerinde."))
-            t = hedef.date()
-            k = cfg["kum"]
-            if t in k["bayram"]:
-                uyarilar.append(("info", "Seçilen gün bayram günü."))
-            elif t in k["oncesi"]:
-                uyarilar.append(("info", "Bayram öncesi (arife dahil) dönem."))
-            if t in k["ozel"]:
-                uyarilar.append(("info", "Özel gün (Anneler Günü, Sevgililer Günü, ek günleriniz vb.)."))
-            if hava_kullan and not use_weather:
-                uyarilar.append(("info", "Hava durumu verisi alınamadı, model havasız çalışıyor."))
-            if not uyarilar:
-                st.success("Dikkat çeken bir durum yok.")
-            for seviye_u, metin in uyarilar:
-                (st.warning if seviye_u == "warning" else st.info)(metin)
+                for grup, pct in etki[:3]:
+                    st.markdown(f"- {grup}: **{pct:+.0f}%**")
 
         st.markdown("### 📋 Çeşit / Boy Dağılımı")
-        if detay is None or detay.empty:
-            st.info("Ürün detay dosyası (`urun_detay.xlsx`) yok. Eklerseniz çeşit ve boy dağılımı da hesaplanır.")
+        if detay_2026 is None or detay_2026.empty:
+            st.info("Detay ürün dağılımı için '2026 pasta satış.xlsx' dosyası kullanılıyor.")
         else:
-            tablo, grup_ad = urun_dagilimi(detay, hedef, uretim, pencere)
+            tablo, grup_ad = urun_dagilimi(detay_2026, hedef, uretim, pencere)
             st.dataframe(tablo)
-            st.caption(f"Pay, son {pencere} günlük satışlardan ({grup_ad} günlerine göre) hesaplandı. Toplam = {uretim} adet.")
 
         st.markdown("### 🗓️ Önümüzdeki 7 gün")
         satirlar = []
@@ -684,94 +576,46 @@ def uygulama():
             tahmin_i = tahmin_et(cfg, veri, mod, yontem, td, s_i, y_i)[0]
             satirlar.append({
                 "Tarih": td.strftime("%d.%m.%Y"), "Gün": GUN_TR[td.dayofweek],
-                "Hava": f"{s_i:.0f}°C" + (" 🌧" if y_i >= 1 else ""),
-                "Beklenen talep": int(round(tahmin_i)), "Önerilen üretim": int(round(tahmin_i * carpan)),
+                "Hava": f"{s_i:.0f}°C", "Beklenen talep": int(round(tahmin_i)), "Önerilen üretim": int(round(tahmin_i * carpan)),
             })
         st.dataframe(pd.DataFrame(satirlar), hide_index=True)
 
-    # ---- Sekme 2: Performans ----
     with tab2:
-        st.subheader("Model kendini nasıl sınadı?")
-        st.caption(
-            "Her gün için, o güne kadarki veriyle tahmin yapılıp gerçek satışla karşılaştırıldı. "
-            "MAPE = ortalama yüzde hata (düşük iyi). Geçmiş hava durumu gerçek değerlerle kullanıldığı için "
-            "gerçek hayatta hata biraz daha yüksek olabilir."
-        )
-        if test is None:
-            st.info(f"Test için en az ~135 günlük veri gerekli. Şu an {len(veri)} gün var.")
-        else:
+        st.subheader("Model Geriye Dönük Test (Backtest) Performansı")
+        if test is not None:
             mm = test["mape"]
             a, b, c = st.columns(3)
             a.metric("Baz çizgi hatası", f"%{mm['Baz'] * 100:.1f}")
             b.metric("Model hatası", f"%{mm['Model'] * 100:.1f}")
             c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}")
-            st.success(f"Seçilen yöntem: **{YONTEM_AD[yontem]}** (en düşük hata). Test edilen gün sayısı: {len(test['bt'])}.")
-            g = test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")
-            st.line_chart(g[["Gerçek", "Baz çizgi", "Model", "Karma"]])
-            son = test["bt"].tail(14).copy()
-            son["Seçilen tahmin"] = son[yontem].round(0).astype(int)
-            son["Sapma %"] = ((son["Seçilen tahmin"] / son["Gercek"] - 1) * 100).round(1)
-            son["Tarih"] = pd.to_datetime(son["Tarih"]).dt.strftime("%d.%m.%Y")
-            son["Gerçek"] = son["Gercek"].round(0).astype(int)
-            st.markdown("**Son 14 gün: tahmin ve gerçek**")
-            st.dataframe(son[["Tarih", "Gerçek", "Seçilen tahmin", "Sapma %"]], hide_index=True)
+            st.success(f"Seçilen en iyi yöntem: **{YONTEM_AD[yontem]}**")
+            st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
-    # ---- Sekme 3: Günlük giriş ----
     with tab3:
-        st.subheader("Günlük satış girişi")
-        if ornek:
-            st.info("Örnek veri modunda kayıt kapalı. Kendi verinizle çalışırken bu bölüm açılır.")
-        else:
-            st.caption("Her akşam o günün toplam satışını girin. Model bir sonraki hesaplamada bunu kullanır.")
-            with st.form("giris", clear_on_submit=True):
-                g_tarih = st.date_input("Tarih", value=BUGUN)
-                g_adet = st.number_input("Toplam satış adedi", min_value=0, step=1)
-                g_bitti = st.checkbox("Gün içinde ürün tükendi")
-                g_not = st.text_input("Not (kampanya, kapalı gün vb.)")
-                kaydet = st.form_submit_button("Kaydet")
-            if kaydet:
-                if g_adet <= 0:
-                    st.error("Satış adedi 0'dan büyük olmalı.")
-                else:
-                    yeni = pd.DataFrame({"Tarih": [pd.Timestamp(g_tarih)], "Adet": [int(g_adet)],
-                                         "Bitti": [bool(g_bitti)], "Not": [g_not]})
-                    birlesik = pd.concat([eklenen_oku(), yeni]).drop_duplicates("Tarih", keep="last")
-                    birlesik.to_csv(EKLENEN_DOSYA, index=False)
-                    st.success(f"{g_tarih:%d.%m.%Y} kaydedildi.")
-                    st.rerun()
-            st.warning(
-                "Streamlit Cloud'da bu giriş uygulama yeniden başlayınca silinebilir. "
-                "Düzenli olarak **Veri** sekmesinden güncel dosyayı indirip GitHub'daki `gunluk_satis` dosyasının yerine yükleyin."
-            )
+        st.subheader("Günlük Satış Girişi")
+        with st.form("giris", clear_on_submit=True):
+            g_tarih = st.date_input("Tarih", value=BUGUN)
+            g_adet = st.number_input("Toplam satış adedi", min_value=0, step=1)
+            g_bitti = st.checkbox("Ürün tükendi")
+            g_not = st.text_input("Not")
+            kaydet = st.form_submit_button("Kaydet")
+        if kaydet and g_adet > 0:
+            yeni = pd.DataFrame({"Tarih": [pd.Timestamp(g_tarih)], "Adet": [int(g_adet)], "Bitti": [bool(g_bitti)], "Not": [g_not]})
+            birlesik = pd.concat([eklenen_oku(), yeni]).drop_duplicates("Tarih", keep="last")
+            birlesik.to_csv(EKLENEN_DOSYA, index=False)
+            st.success("Kaydedildi!")
+            st.rerun()
 
-    # ---- Sekme 4: Veri ----
     with tab4:
-        st.subheader("Günlük satış verisi")
-        gun_aralik = (veri["Tarih"].max() - veri["Tarih"].min()).days + 1
-        eksik = gun_aralik - len(veri)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Kayıtlı gün", len(veri))
-        c2.metric("İlk - son tarih", f"{veri['Tarih'].min():%d.%m.%y} - {veri['Tarih'].max():%d.%m.%y}")
-        c3.metric("Aradaki eksik gün", eksik)
-        if eksik > 0:
-            st.caption("Eksik günler (kapalı gün ya da girilmemiş) modele dahil edilmez; sorun değil ama çok fazlaysa kontrol edin.")
-        goster = gunluk.copy()
+        st.subheader("Birleştirilmiş Veri Havuzu")
+        st.caption(f"Toplam kayıtlı gün sayısı: {len(veri)}")
+        goster = veri.copy()
         goster["Tarih"] = goster["Tarih"].dt.strftime("%d.%m.%Y")
-        goster["Bitti"] = goster["Bitti"].map({True: "Evet", False: "Hayır"})
-        st.dataframe(goster.iloc[::-1].rename(columns={"Adet": "Toplam Adet", "Bitti": "Ürün Bitti mi"}), hide_index=True)
-        indir = gunluk.rename(columns={"Adet": "Toplam Adet", "Bitti": "Ürün Bitti mi"}).copy()
-        indir["Ürün Bitti mi"] = indir["Ürün Bitti mi"].map({True: "Evet", False: "Hayır"})
-        st.download_button("⬇️ Güncel veriyi indir (CSV)", indir.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="gunluk_satis.csv", mime="text/csv")
-        if detay is not None:
-            st.subheader("Ürün detay verisi")
-            st.caption(f"{detay['Tarih'].min():%d.%m.%Y} - {detay['Tarih'].max():%d.%m.%Y}, "
-                       f"{detay['Cesit'].nunique()} çeşit, {detay['Boy'].nunique()} boy")
-            st.dataframe(detay.tail(200), hide_index=True)
+        st.dataframe(goster.iloc[::-1], hide_index=True)
 
 
 try:
     uygulama()
 except Exception as ex:
-    st.error(f"Beklenmeyen hata: {type(ex).__name__}: {ex}")
+    st.error(f"Hata: {ex}")
     st.exception(ex)
