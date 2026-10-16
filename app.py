@@ -376,7 +376,7 @@ def aciklama(mod, xr):
     for grup, cols in GRUPLAR.items():
         c = katki[[x for x in cols if x in katki.index]].sum()
         pct = (np.exp(c) - 1) * 100
-        if abs(pct >= 1):
+        if abs(pct) >= 1:
             satirlar.append((grup, float(pct)))
     return sorted(satirlar, key=lambda s: -abs(s[1]))
 
@@ -410,11 +410,11 @@ def urun_dagilimi(detay, hedef, toplam, pencere=60, k_cesit=300.0):
     if cesit_pay.sum() > 0:
         cesit_pay = cesit_pay / cesit_pay.sum()
         
-    sonuc = yuvarla_topla((cesit_pay * toplam).ravel(), toplam)
+    sonuc = yuvarla_topla((cesit_pay * toplam).to_numpy(), toplam)
     
     tablo = pd.DataFrame({"Önerilen Üretim (Adet)": sonuc}, index=cesitler)
     tablo.loc["TOPLAM"] = tablo.sum()
-    tablo.index.name = "Ürün Çeşidi / Boy"
+    tablo.index.name = "Ürün Çeşidi"
     return tablo.astype(int), ("Cuma-Pazar" if hs else "Pazartesi-Perşembe")
 
 
@@ -581,7 +581,7 @@ def uygulama():
     with tab3:
         st.subheader("Günlük Satış Girişi")
         with st.form("giris", clear_on_submit=True):
-            g_tarih = st.date_input("Tarih", value=BUGUN)
+            g_tarih = st.date_input("Üretim/Satış Tarihi", value=BUGUN)
             g_adet = st.number_input("Toplam satış adedi", min_value=0, step=1)
             g_bitti = st.checkbox("Ürün tükendi")
             g_not = st.text_input("Not")
