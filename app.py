@@ -1125,9 +1125,16 @@ def uygulama():
             "uretim": int(round(beklenen * carpan)),
         }
 
+    # --- OTOMATİK TAHMİN LOGLAMA (Arka planda tüm veriler için eksik logları tamamlar) ---
+    existing_logs = set(log_oku()["Hedef"])
+    for vt in veri["Tarih"]:
+        if vt not in existing_logs:
+            p_ot = planla(vt)
+            log_yaz(vt, p_ot["beklenen"], p_ot["uretim"], p_ot["baz"], yontem)
+
+    # Yarının tahmini için de otomatik log
     bugun_ts = pd.Timestamp(BUGUN)
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
-
     yarin = yaklasan[0]
     if yarin["tarih"] not in veri_tarihleri:
         log_yaz(yarin["tarih"], yarin["beklenen"], yarin["uretim"], yarin["baz"], yontem)
@@ -1164,7 +1171,7 @@ def uygulama():
             for sev, m in uyarilar:
                 {"hata": st.error, "uyari": st.warning, "bilgi": st.info}[sev](m)
 
-    # ------------------------- YENİ SEKMELER -------------------------
+    # ------------------------- SEKMELER -------------------------
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🚀 Üretim Planı", "📈 Model Performansı", "🎯 Tahmin Takip", "📝 Veri Girişi", "🔔 Uyarılar", "📂 Veri Arşivi"])
 
@@ -1247,22 +1254,22 @@ def uygulama():
             c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}")
             st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
-    # ---- Sekme 3: Tahmin Takip (YENİ SEKME) ----
+    # ---- Sekme 3: Tahmin Takip ----
     with tab3:
         st.subheader("🎯 Kaydedilen Tahminler ve Gerçekleşen Karşılaştırması")
-        st.caption("Sistemin daha önce ürettiği ve kaydettiği tahminlerin, o günkü gerçek satış/siparişlerle kıyaslandığı ana takip ekranı.")
+        st.caption("Sistemin ürettiği tahminlerin o günkü gerçek satış/siparişlerle kıyaslandığı ana takip ekranı.")
         
-        if log_df.empty:
-            st.info("Henüz kaydedilmiş tahmin bulunmuyor. Üretim Planı sekmesinden **'💾 Bu tahmini takibe kaydet'** butonuna basarak veya gelecek günlerin tahminlerini loglayarak burada görebilirsin.")
+        log_df_guncel = log_oku()
+        if log_df_guncel.empty:
+            st.info("Henüz kaydedilmiş tahmin bulunmuyor.")
         else:
-            takip_df = log_df.merge(veri[["Tarih", "Y"]], left_on="Hedef", right_on="Tarih", how="left")
+            takip_df = log_df_guncel.merge(veri[["Tarih", "Y"]], left_on="Hedef", right_on="Tarih", how="left")
             takip_df["Gerçekleşen"] = takip_df["Y"]
             takip_df["Sapma (Adet)"] = takip_df["Beklenen"] - takip_df["Gerçekleşen"]
             takip_df["Sapma (%)"] = ((takip_df["Beklenen"] - takip_df["Gerçekleşen"]) / takip_df["Gerçekleşen"] * 100).round(1)
             
-            # Özet metrikler
             gerceklesen_var = takip_df[takip_df["Gerçekleşen"].notna()]
-            if not gerceklesen_vâr := gerceklesen_var.empty:
+            if not gerceklesen_var.empty:
                 t1, t2, t3 = st.columns(3)
                 t1.metric("Toplam Kayıtlı Tahmin", len(takip_df))
                 t2.metric("Verisi Girilmiş Gün Sayısı", len(gerceklesen_var))
