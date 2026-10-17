@@ -1014,7 +1014,7 @@ def uygulama():
         veri["Adet"] = pd.to_numeric(veri["Adet"], errors="coerce")
         veri = veri.dropna(subset=["Tarih", "Adet"])
         
-        # --- ÖNEMLİ FİLTRE: 0 veya negatif adetli günleri model eğitiminden tamamen hariç tut ---
+        # --- FİLTRE: 0 veya negatif adetli günleri model eğitiminden hariç tut ---
         veri = veri[veri["Adet"] > 0]
         
         veri["Bitti"] = veri["Bitti"].map(lambda x: bool(x) if pd.notna(x) else False)
@@ -1275,7 +1275,7 @@ def uygulama():
                 t3.metric("Ortalama Mutlak Sapma", f"%{ortalama_hata:.1f}")
 
             st.markdown("---")
-            goster_takip = takip_df[["Hedef", "Beklenen", `Uretim`, "Gerçekleşen", "Sapma (Adet)", "Sapma (%)", "Yontem", "Kayit"]].copy()
+            goster_takip = takip_df[["Hedef", "Beklenen", "Uretim", "Gerçekleşen", "Sapma (Adet)", "Sapma (%)", "Yontem", "Kayit"]].copy()
             goster_takip["Hedef"] = goster_takip["Hedef"].dt.strftime("%d.%m.%Y")
             goster_takip["Beklenen"] = goster_takip["Beklenen"].round(0).astype("Int64")
             goster_takip["Uretim"] = goster_takip["Uretim"].round(0).astype("Int64")
