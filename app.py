@@ -1014,8 +1014,8 @@ def uygulama():
         veri["Adet"] = pd.to_numeric(veri["Adet"], errors="coerce")
         veri = veri.dropna(subset=["Tarih", "Adet"])
         
-        # --- FİLTRE: 0 veya negatif adetli günleri model eğitiminden hariç tut ---
-        veri = veri[veri["Adet"] > 0]
+        # --- GÜNCELLENEN FİLTRE: Toplam sipariş miktarı 10'un altında olan sahte/çapa günleri tahminlemeye dahil etme ---
+        veri = veri[veri["Adet"] >= 10]
         
         veri["Bitti"] = veri["Bitti"].map(lambda x: bool(x) if pd.notna(x) else False)
         veri["Not"] = veri["Not"].fillna("").astype(str)
