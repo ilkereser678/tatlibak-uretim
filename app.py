@@ -1013,7 +1013,10 @@ def uygulama():
         veri["Tarih"] = _dt64(veri["Tarih"])
         veri["Adet"] = pd.to_numeric(veri["Adet"], errors="coerce")
         veri = veri.dropna(subset=["Tarih", "Adet"])
+        
+        # --- ÖNEMLİ FİLTRE: 0 veya negatif adetli günleri model eğitiminden tamamen hariç tut ---
         veri = veri[veri["Adet"] > 0]
+        
         veri["Bitti"] = veri["Bitti"].map(lambda x: bool(x) if pd.notna(x) else False)
         veri["Not"] = veri["Not"].fillna("").astype(str)
         veri = veri.drop_duplicates("Tarih", keep="last").sort_values("Tarih").reset_index(drop=True)
@@ -1125,14 +1128,12 @@ def uygulama():
             "uretim": int(round(beklenen * carpan)),
         }
 
-    # --- OTOMATİK TAHMİN LOGLAMA (Arka planda tüm veriler için eksik logları tamamlar) ---
     existing_logs = set(log_oku()["Hedef"])
     for vt in veri["Tarih"]:
         if vt not in existing_logs:
             p_ot = planla(vt)
             log_yaz(vt, p_ot["beklenen"], p_ot["uretim"], p_ot["baz"], yontem)
 
-    # Yarının tahmini için de otomatik log
     bugun_ts = pd.Timestamp(BUGUN)
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
     yarin = yaklasan[0]
@@ -1175,7 +1176,6 @@ def uygulama():
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🚀 Üretim Planı", "📈 Model Performansı", "🎯 Tahmin Takip", "📝 Veri Girişi", "🔔 Uyarılar", "📂 Veri Arşivi"])
 
-    # ---- Sekme 1: Üretim planı ----
     with tab1:
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -1243,7 +1243,6 @@ def uygulama():
             })
         _df(pd.DataFrame(satirlar), hide_index=True)
 
-    # ---- Sekme 2: Model performansı ----
     with tab2:
         st.subheader("Model Geriye Dönük Test Performansı")
         if test is not None:
@@ -1254,7 +1253,6 @@ def uygulama():
             c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}")
             st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
 
-    # ---- Sekme 3: Tahmin Takip ----
     with tab3:
         st.subheader("🎯 Kaydedilen Tahminler ve Gerçekleşen Karşılaştırması")
         st.caption("Sistemin ürettiği tahminlerin o günkü gerçek satış/siparişlerle kıyaslandığı ana takip ekranı.")
@@ -1277,7 +1275,7 @@ def uygulama():
                 t3.metric("Ortalama Mutlak Sapma", f"%{ortalama_hata:.1f}")
 
             st.markdown("---")
-            goster_takip = takip_df[["Hedef", "Beklenen", "Uretim", "Gerçekleşen", "Sapma (Adet)", "Sapma (%)", "Yontem", "Kayit"]].copy()
+            goster_takip = takip_df[["Hedef", "Beklenen", `Uretim`, "Gerçekleşen", "Sapma (Adet)", "Sapma (%)", "Yontem", "Kayit"]].copy()
             goster_takip["Hedef"] = goster_takip["Hedef"].dt.strftime("%d.%m.%Y")
             goster_takip["Beklenen"] = goster_takip["Beklenen"].round(0).astype("Int64")
             goster_takip["Uretim"] = goster_takip["Uretim"].round(0).astype("Int64")
@@ -1289,11 +1287,9 @@ def uygulama():
             st.download_button("⬇️ Tahmin Takip Verisini İndir", goster_takip.to_csv(index=False).encode("utf-8-sig"),
                                file_name="tahmin_takip.csv", mime="text/csv")
 
-    # ---- Sekme 4: Veri girişi ----
     with tab4:
         giris_sekmesi(aktif_urunler, detay_tum, meta_db)
 
-    # ---- Sekme 5: Uyarılar ----
     with tab5:
         st.subheader("🔔 Sistem Uyarıları ve Takip Özeti")
         if not gl.empty:
@@ -1301,7 +1297,6 @@ def uygulama():
         else:
             st.info("Henüz karşılaştırma verisi yok.")
 
-    # ---- Sekme 6: Veri arşivi ----
     with tab6:
         arsiv_sekmesi(veri, gecmis_log)
 
