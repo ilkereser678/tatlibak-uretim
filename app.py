@@ -685,7 +685,7 @@ def baz_cizgi(v, hedef):
 
 
 @st.cache_data(show_spinner="Geriye dönük test çalışıyor...")
-def geriye_donuk_test(v, X, alphalar=(1.0, 3.0, 10.0, 30.0), test_gun=56, min_egitim=120):
+def geriye_donuk_test(v, X, alphalar=(1.0, 3.0, 10.0, 30.0), test_gun=56, min_egitim=60):
     n = len(v)
     if n < min_egitim + 14:
         return None
@@ -1014,7 +1014,7 @@ def uygulama():
         veri["Adet"] = pd.to_numeric(veri["Adet"], errors="coerce")
         veri = veri.dropna(subset=["Tarih", "Adet"])
         
-        # --- GÜNCELLENEN FİLTRE: Toplam sipariş miktarı 10'un altında olan sahte/çapa günleri tahminlemeye dahil etme ---
+        # --- FİLTRE: 10 adedin altındaki sahte/çapa günleri model eğitiminden hariç tut ---
         veri = veri[veri["Adet"] >= 10]
         
         veri["Bitti"] = veri["Bitti"].map(lambda x: bool(x) if pd.notna(x) else False)
@@ -1029,8 +1029,8 @@ def uygulama():
         notlar = {t: n for t, n in zip(meta_db["Tarih"], meta_db["Not"]) if n}
         veri["Not"] = [notlar.get(t, n) for t, n in zip(veri["Tarih"], veri["Not"])]
 
-    if len(veri) < 28:
-        st.error(f"Tahmin için en az 28 günlük veri gerekli, şu an {len(veri)} gün var.")
+    if len(veri) < 14:
+        st.error(f"Tahmin için en az 14 günlük veri gerekli, şu an {len(veri)} gün var.")
         sek = st.tabs(["📝 Veri Girişi", "📂 Veri Arşivi"])
         with sek[0]:
             giris_sekmesi(orijinal_urun_sirasi, detay_tum, meta_db)
@@ -1107,7 +1107,7 @@ def uygulama():
         return alt["Gercek"] / alt[yontem]
 
     def carpan_hesapla(sv, hedef_ts):
-        if test is None or len(test["bt"]) < 20:
+        if test is None or len(test["bt"]) < 10:
             return 1.10, False
         return float(np.quantile(oran_serisi(hedef_ts), sv)), True
 
@@ -1252,6 +1252,8 @@ def uygulama():
             b.metric("Model hatası", f"%{mm['Model'] * 100:.1f}")
             c.metric("Karma hatası", f"%{mm['Karma'] * 100:.1f}")
             st.line_chart(test["bt"].rename(columns={"Gercek": "Gerçek", "Baz": "Baz çizgi"}).set_index("Tarih")[["Gerçek", "Model"]])
+        else:
+            st.info("Test grafiği için yeterli veri aralığı oluşmadı (en az 60+ günlük kesintisiz veri gerekiyor).")
 
     with tab3:
         st.subheader("🎯 Kaydedilen Tahminler ve Gerçekleşen Karşılaştırması")
@@ -1292,7 +1294,13 @@ def uygulama():
 
     with tab5:
         st.subheader("🔔 Sistem Uyarıları ve Takip Özeti")
+        if uyarilar:
+            st.markdown("### Güncel Uyarılar:")
+            for sev, m in uyarilar:
+                {"hata": st.error, "uyari": st.warning, "bilgi": st.info}[sev](m)
+        st.markdown("---")
         if not gl.empty:
+            st.markdown("### Tahmin ve Gerçekleşen Satış Grafiği")
             st.line_chart(gl.set_index("Hedef")[["Beklenen", "Y"]].rename(columns={"Y": "Gerçek"}))
         else:
             st.info("Henüz karşılaştırma verisi yok.")
