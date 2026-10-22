@@ -1341,12 +1341,12 @@ def uygulama():
             a.metric("Baz çizgi hatası (MAPEA)", f"%{test['mape_baz'] * 100:.1f}")
             b.metric("Model hatası (MAPEA)", f"%{test['mape_model'] * 100:.1f}")
             
-             grafik_df = pd.DataFrame({
+            grafik_df = pd.DataFrame({
                 "Gerçek": veri["Y"].tail(len(test["tahmin_model"])).values,
                 "Model": test["tahmin_model"],
                 "Baz": test["tahmin_baz"]
             }, index=veri["Tarih"].tail(len(test["tahmin_model"])))
-            st.line_chart(графіk_df) if 'графіk_df' in locals() else st.line_chart(grafik_df)
+            st.line_chart(grafik_df)
         else:
             st.info("Test grafiği için yeterli veri aralığı oluşmadı (en az 60+ günlük veri gerekiyor).")
 
