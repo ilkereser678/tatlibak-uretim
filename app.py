@@ -1468,7 +1468,7 @@ def uygulama():
         if len(s) and pd.notna(s["sicaklik"].iloc[0]):
             yag = s["yagis"].iloc[0]
             yag = 0.0 if pd.isna(yag) else float(yag)
-            kaynak = "gerleşen" if tarih.date() < BUGUN else "tahmin"
+            kaynak = "gerçekleşen" if tarih.date() < BUGUN else "tahmin"
             return float(s["sicaklik"].iloc[0]), yag, kaynak
         m = hava[hava["Tarih"].dt.month == tarih.month]["sicaklik"].mean()
         if pd.isna(m):
@@ -1520,10 +1520,14 @@ def uygulama():
     olay_tablo = olay_etkileri(veri, cfg["kum"])
 
     bugun_ts = pd.Timestamp(BUGUN)
+    
+    # ------------------------------------------------------------------------
+    # ÖNEMLİ DEĞİŞİKLİK: Önümüzdeki 7 günün tahminini otomatik kaydet
+    # ------------------------------------------------------------------------
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
-    yarin = yaklasan[0]
-    if yarin["tarih"] not in veri_tarihleri:
-        log_yaz(yarin["tarih"], yarin["beklenen"], yarin["uretim"], yarin["baz"], yontem)
+    for p in yaklasan:
+        if p["tarih"] not in veri_tarihleri:
+            log_yaz(p["tarih"], p["beklenen"], p["uretim"], p["baz"], yontem)
 
     log_df = log_oku()
     gl = log_df.merge(veri[["Tarih", "Y"]], left_on="Hedef", right_on="Tarih", how="inner")
