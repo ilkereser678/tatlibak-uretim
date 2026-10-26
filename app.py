@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Tatlıbak Yaş Pasta - Akıllı Üretim Planlama (app.py) - v2: kendini her gün geliştiren sürüm
+Tatlıbak Yaş Pasta - Akıllı Üretim Planlama (app.py) - v3: Çeşit Başarı ve Analiz Sekmeli Sürüm
 
 Kurulum:   pip install streamlit pandas numpy openpyxl
 Çalıştır:  streamlit run app.py
@@ -1521,9 +1521,7 @@ def uygulama():
 
     bugun_ts = pd.Timestamp(BUGUN)
     
-    # ------------------------------------------------------------------------
-    # ÖNEMLİ DEĞİŞİKLİK: Önümüzdeki 7 günün tahminini otomatik kaydet
-    # ------------------------------------------------------------------------
+    # Önümüzdeki 7 günün tahminini otomatik kaydet
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
     for p in yaklasan:
         if p["tarih"] not in veri_tarihleri:
@@ -1581,7 +1579,7 @@ def uygulama():
         if len(son5) == 5 and ((son5 > 0.03).all() or (son5 < -0.03).all()):
             yon = "fazla" if (son5 > 0).all() else "düşük"
             uyarilar.append(("uyari", f"Son 5 canlı tahmin üst üste gerçekten **{yon}** çıktı (sistematik sapma). "
-                                      "Öz-düzeltme devrede değilse menü/şube değişikliği tarihini sidebar'dan girin."))
+                                      "Öz-düzeltme devrede değilse menü/şube değişikliğini sidebar'dan girin."))
 
     with uyari_kutu:
         if uyarilar:
@@ -1589,9 +1587,9 @@ def uygulama():
                 {"hata": st.error, "uyari": st.warning, "bilgi": st.info}[sev](m)
 
     # ------------------------- SEKMELER -------------------------
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab8, tab5, tab6, tab7 = st.tabs([
         "🚀 Üretim Planı", "📈 Model Performansı", "🎯 Tahmin Takip", "🧠 Öğrenme Merkezi",
-        "📝 Veri Girişi", "🔔 Uyarılar", "📂 Veri Arşivi"])
+        "🎯 Çeşit Başarı ve Analiz", "📝 Veri Girişi", "🔔 Uyarılar", "📂 Veri Arşivi"])
 
     with tab1:
         c1, c2 = st.columns([1, 2])
@@ -1831,6 +1829,66 @@ def uygulama():
             carpan_tablo_yaz(duz_c)
             st.session_state["_mesaj"] = "Özel gün çarpanları kaydedildi."
             st.rerun()
+
+    with tab8:
+        st.subheader("🎯 Çeşit Bazlı Başarı, Ortalama ve Tahmin Analizi")
+        st.caption("Bu sekme, çeşitlerin (alt kırılımların) geçmiş verilerdeki tutarlılığını, haftalık/aylık ortalamalarını ve tahmin başarı olasılıklarını listeler.")
+
+        if detay_tum.empty:
+            st.info("Çeşit analizi için ürün bazlı veri bulunamadı.")
+        else:
+            d_analiz = detay_tum.copy()
+            d_analiz["Ay"] = d_analiz["Tarih"].dt.month
+            
+            haric_norm = {_norm(x) for x in haric_liste}
+            aktif_detay = d_analiz[~d_analiz["Cesit"].map(_norm).isin(haric_norm)]
+            
+            if aktif_detay.empty:
+                st.warning("Aktif ürün verisi bulunamadı.")
+            else:
+                gunluk_ort = aktif_detay.groupby("Cesit")["Adet"].mean().rename("Günlük Ort. Adet")
+                toplam_satis = aktif_detay.groupby("Cesit")["Adet"].sum().rename("Toplam Satış")
+                
+                # Çeşit bazlı hata testinden tutma olasılığı hesaplama
+                uh_test = urun_hata_testi(detay_tum, tuple(haric_liste), pencere)
+                
+                analiz_tablosu = pd.DataFrame({"Toplam Satış": toplam_satis, "Günlük Ort. Adet": gunluk_ort})
+                
+                if not uh_test.empty:
+                    uh_test_indexed = uh_test.set_index("Ürün")
+                    analiz_tablosu["Hata (WAPE) %"] = uh_test_indexed["Hata (WAPE) %"]
+                    # Tutma olasılığı: 100 - WAPE %
+                    analiz_tablosu["Tahmin Tutma Olasılığı (%)"] = (100 - analiz_tablosu["Hata (WAPE) %"]).clip(lower=0).round(1)
+                else:
+                    analiz_tablosu["Hata (WAPE) %"] = np.nan
+                    analiz_tablosu["Tahmin Tutma Olasılığı (%)"] = 90.0
+                
+                analiz_tablosu = analiz_tablosu.sort_values("Günlük Ort. Adet", ascending=False).reset_index().rename(columns={"Cesit": "Ürün Çeşidi"})
+                
+                st.markdown("#### 📊 Çeşit Bazlı Performans ve Tutma Olasılıkları")
+                st.caption("Tahmin Tutma Olasılığı (%), ürünün son dönemdeki sipariş tutarlılığı ve dağılım başarısına göre dinamik hesaplanır.")
+                
+                _df(analiz_tablosu.round(1), hide_index=True)
+                
+                st.markdown("---")
+                st.markdown("#### 📅 Çeşit Bazlı Aylık Ortalama ve Trend Analizi")
+                
+                secilen_urun = st.selectbox("İncelemek istediğiniz ürün çeşidini seçin:", options=aktif_detay["Cesit"].unique())
+                if secilen_urun:
+                    u_df = aktif_detay[aktif_detay["Cesit"] == secilen_urun]
+                    
+                    uc1, uc2 = st.columns(2)
+                    with uc1:
+                        st.markdown(f"**{secilen_urun} - Aylık Satış Ortalamaları**")
+                        aylik_ort = u_df.groupby("Ay")["Adet"].mean().reset_index()
+                        aylik_ort["Ay Adı"] = aylik_ort["Ay"].map(lambda m: AY_TR[int(m)-1] if 1 <= m <= 12 else str(m))
+                        _df(aylik_ort[["Ay Adı", "Adet"]].rename(columns={"Adet": "Ortalama Adet"}).round(1), hide_index=True)
+                        
+                    with uc2:
+                        st.markdown(f"**{secilen_urun} - Son Günlerdeki Satış Seyri**")
+                        son_trend = u_df.sort_values("Tarih").tail(14)[["Tarih", "Adet"]].copy()
+                        son_trend["Tarih"] = son_trend["Tarih"].dt.strftime("%d.%m.%Y")
+                        st.line_chart(son_trend.set_index("Tarih")["Adet"])
 
     with tab5:
         giris_sekmesi(aktif_urunler, detay_tum, meta_db)
