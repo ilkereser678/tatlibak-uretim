@@ -1723,6 +1723,7 @@ def uygulama():
                 t4.metric("Canlı yanlılık", "-")
 
             st.markdown("---")
+            st.markdown("### 🔮 İleriye Dönük Kaydedilen Tahminler")
             goster_takip = takip_df[["Hedef", "Beklenen", "Uretim", "Gerçekleşen", "Sapma (Adet)", "Sapma (%)",
                                      "Yontem", "Tür", "Kayit"]].copy()
             goster_takip["Hedef"] = goster_takip["Hedef"].dt.strftime("%d.%m.%Y")
@@ -1732,6 +1733,27 @@ def uygulama():
             _df(goster_takip.iloc[::-1], hide_index=True)
             st.download_button("⬇️ Tahmin Takip Verisini İndir", goster_takip.to_csv(index=False).encode("utf-8-sig"),
                                file_name="tahmin_takip.csv", mime="text/csv")
+
+            st.markdown("---")
+            st.markdown("### ⏪ Geçmiş Son 1 Haftanın Tahminleri ve Tutma Olasılıkları")
+            st.caption("Geçmiş son 7 güne ait yapılan tahminlerin gerçekleşen değerler ile kıyaslanması ve başarı/tutma olasılıkları.")
+            
+            gecmis_bir_hafta = takip_df[takip_df["Gerçekleşen"].notna()].tail(7).copy()
+            if gecmis_bir_hafta.empty:
+                st.info("Son 1 hafta için gerçekleşen sonucu olan kayıt bulunmuyor.")
+            else:
+                gecmis_tablo = pd.DataFrame({
+                    "Hedef Tarih": gecmis_bir_hafta["Hedef"].dt.strftime("%d.%m.%Y"),
+                    "Beklenen Tahmin": gecmis_bir_hafta["Beklenen"].round(0).astype(int),
+                    "Gerçekleşen Satış": gecmis_bir_hafta["Gerçekleşen"].round(0).astype(int),
+                    "Mutlak Hata (%)": (gecmis_bir_hafta["Sapma (%)"].abs()).round(1)
+                })
+                # Tutma Olasılığı: 100 - Mutlak Hata (%) (0 ile 100 arasında sınırlandırılır)
+                gecmis_tablo["Tutma Olasılığı (%)"] = (100 - gecmis_tablo["Mutlak Hata (%)"]).clip(lower=0, upper=100)
+                gecmis_tablo["Mutlak Hata (%)"] = gecmis_tablo["Mutlak Hata (%)"].map(lambda x: f"%{x:.1f}")
+                gecmis_tablo["Tutma Olasılığı (%)"] = gecmis_tablo["Tutma Olasılığı (%)"].map(lambda x: f"%{x:.1f}")
+                
+                _df(gecmis_tablo.iloc[::-1], hide_index=True)
 
     with tab4:
         st.subheader("🧠 Öğrenme Merkezi")
