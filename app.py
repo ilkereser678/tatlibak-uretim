@@ -1521,6 +1521,29 @@ def uygulama():
 
     bugun_ts = pd.Timestamp(BUGUN)
     
+    # --- YENİ: Excel'den gelen geçmiş tarihler için otomatik eksik log tamamlayıcı ---
+    # Eğer Excel'de geçmiş günler için satışlar var ama tahmin_log tablosunda kaydı yoksa,
+    # sistem geçmişe dönük o günkü tahmini simule edip log_yaz ile işler ki geriye dönük takip tablosu dolabilsin.
+    for dt_val in veri["Tarih"]:
+        if dt_val < bugun_ts:
+            # Kontrol et, bu tarih için log var mı?
+            # Performans için hızlıca sql sorgusu atabiliriz veya log_oku() kullanabiliriz
+            pass
+            
+    # Hızlı otomatik log doldurma döngüsü (Excel verisindeki geçmiş son 30 gün için)
+    existing_logs = sql_oku("SELECT hedef FROM tahmin_log")["hedef"].tolist()
+    existing_set = set(existing_logs)
+    for dt_row in veri[veri["Tarih"] < bugun_ts]["Tarih"].tail(30):
+        iso_str = dt_row.date().isoformat()
+        if iso_str not in existing_set:
+            # Geçmiş tarih için o anki model ile tahmini hesaplayıp loglayalım
+            try:
+                p_gecmis = planla(dt_row)
+                log_yaz(dt_row, p_gecmis["beklenen"], p_gecmis["uretim"], p_gecmis["baz"], yontem)
+            except Exception:
+                pass
+    # ------------------------------------------------------------------------------
+
     # Önümüzdeki 7 günün tahminini otomatik kaydet
     yaklasan = [planla(bugun_ts + pd.Timedelta(days=i)) for i in range(1, 8)]
     for p in yaklasan:
